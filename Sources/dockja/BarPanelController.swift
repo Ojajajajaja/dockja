@@ -11,6 +11,9 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     private let snapper = EdgeSnapper()
     private let frameSaveDebouncer = Debouncer(interval: 0.4)
     private var isAdjustingFrame = false
+    /// True while the user is dragging the panel; suppresses the periodic
+    /// reposition so a content refresh can't yank the bar back to its edge.
+    private var isUserDragging = false
 
     var onSelect: ((WindowInfo) -> Void)?
     var onRightClick: ((CGWindowID, NSView) -> Void)?
@@ -76,6 +79,7 @@ final class BarPanelController: NSObject, NSWindowDelegate {
 
     /// Compact: just fit content (free position). Apple Dock: fit + snap to edge.
     private func resizeAndPlace() {
+        guard !isUserDragging else { return }   // never reposition mid-drag
         guard let host = panel.contentView else { return }
         let fitting = host.fittingSize
         guard fitting.width > 1, fitting.height > 1 else { return }
@@ -126,8 +130,10 @@ final class BarPanelController: NSObject, NSWindowDelegate {
 
     func windowDidMove(_ notification: Notification) {
         guard !isAdjustingFrame else { return }
+        isUserDragging = true
         frameSaveDebouncer.call { [weak self] in
             guard let self else { return }
+            self.isUserDragging = false
             switch self.model.mode {
             case .compact:
                 self.settings.update { $0.barFrame = self.panel.frame }

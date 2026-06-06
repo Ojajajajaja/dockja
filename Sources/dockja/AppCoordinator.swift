@@ -102,6 +102,11 @@ final class AppCoordinator {
     // MARK: - Refresh
 
     private func handleFrontmost(_ app: NSRunningApplication?) {
+        // Ignore our own activation (e.g. when the edit popover takes keyboard
+        // focus): keep showing the real target app's bar instead of hiding it.
+        if let app, app.processIdentifier == NSRunningApplication.current.processIdentifier {
+            return
+        }
         currentApp = app
         stopTimer()
         refreshDebouncer.call { [weak self] in
