@@ -1,61 +1,119 @@
 import SwiftUI
 import AppKit
+import CoreGraphics
 import DockjaCore
 
 final class BarModel: ObservableObject {
-    @Published var icon: NSImage?
-    @Published var windows: [WindowInfo] = []
+    @Published var mode: DisplayMode = .compact
+    @Published var edge: DockEdge = .bottom
+    @Published var appIcon: NSImage?
+    @Published var items: [DisplayWindow] = []
 
-    func update(icon: NSImage?, windows: [WindowInfo]) {
-        self.icon = icon
-        self.windows = windows
+    private var iconCache: [String: NSImage] = [:]
+
+    func update(items: [DisplayWindow], appIcon: NSImage?) {
+        self.items = items
+        self.appIcon = appIcon
+    }
+
+    /// Custom icon for the item if set & loadable, else the app icon.
+    func image(for item: DisplayWindow) -> NSImage? {
+        if let path = item.iconPath {
+            if let cached = iconCache[path] { return cached }
+            if let img = NSImage(contentsOfFile: path) {
+                iconCache[path] = img
+                return img
+            }
+        }
+        return appIcon
     }
 }
 
 struct BarView: View {
     @ObservedObject var model: BarModel
     let onSelect: (WindowInfo) -> Void
+    let onRightClick: (CGWindowID, NSView) -> Void
 
-    // Fixed chip geometry so every entry is the same size regardless of title.
+    var body: some View {
+        Group {
+            switch model.mode {
+            case .compact:
+                CompactBar(model: model, onSelect: onSelect, onRightClick: onRightClick)
+            case .appleDock:
+                DockBar(model: model, onSelect: onSelect, onRightClick: onRightClick)
+            }
+        }
+    }
+}
+
+struct CompactBar: View {
+    @ObservedObject var model: BarModel
+    let onSelect: (WindowInfo) -> Void
+    let onRightClick: (CGWindowID, NSView) -> Void
+
     private let chipWidth: CGFloat = 150
     private let chipHeight: CGFloat = 28
     private let iconSize: CGFloat = 16
 
     var body: some View {
         HStack(spacing: 6) {
-            ForEach(Array(model.windows.enumerated()), id: \.offset) { _, win in
+            ForEach(Array(model.items.enumerated()), id: \.offset) { _, item in
                 Button {
-                    onSelect(win)
+                    onSelect(item.window)
                 } label: {
                     ZStack {
-                        // Name centered within the whole chip; horizontal padding
-                        // keeps it clear of the icon on both sides so short names
-                        // sit visually centered.
-                        Text(win.displayLabel)
+                        Text(item.name)
                             .lineLimit(1)
                             .truncationMode(.tail)
                             .frame(maxWidth: .infinity)
                             .padding(.horizontal, iconSize + 10)
-                        if let icon = model.icon {
-                            HStack {
-                                Image(nsImage: icon).resizable()
-                                    .frame(width: iconSize, height: iconSize)
-                                Spacer(minLength: 0)
+                        HStack {
+                            if let icon = model.image(for: item) {
+                                Image(nsImage: icon).resizable().frame(width: iconSize, height: iconSize)
                             }
-                            .padding(.leading, 6)
+                            Spacer(minLength: 0)
                         }
+                        .padding(.leading, 6)
                     }
                     .frame(width: chipWidth, height: chipHeight)
-                    .background(win.isActive ? Color.accentColor.opacity(0.3)
-                                             : Color.gray.opacity(0.15))
+                    .background(item.window.isActive ? Color.accentColor.opacity(0.3)
+                                                     : Color.gray.opacity(0.15))
                     .cornerRadius(6)
                 }
                 .buttonStyle(.plain)
-                .opacity(win.isMinimized ? 0.5 : 1.0)
+                .opacity(item.window.isMinimized ? 0.5 : 1.0)
+                .background(RightClickCatcher { view in onRightClick(item.window.id, view) })
             }
         }
         .padding(8)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .fixedSize()
+    }
+}
+
+/// Transparent overlay that reports right-clicks and exposes its NSView as a
+/// popover anchor.
+struct RightClickCatcher: NSViewRepresentable {
+    let onRightClick: (NSView) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let v = RightClickView()
+        v.onRightClick = onRightClick
+        return v
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? RightClickView)?.onRightClick = onRightClick
+    }
+
+    final class RightClickView: NSView {
+        var onRightClick: ((NSView) -> Void)?
+        override func rightMouseDown(with event: NSEvent) { onRightClick?(self) }
+        // Let normal left-clicks pass through to the SwiftUI button beneath.
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            // Only intercept right-clicks; return nil for other cases so the
+            // button still receives left clicks.
+            guard let event = NSApp.currentEvent else { return nil }
+            return event.type == .rightMouseDown ? self : nil
+        }
     }
 }
