@@ -1,2 +1,7 @@
-// Replaced in Task 11 with the real NSApplication entry point.
-print("dockja")
+import AppKit
+
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.setActivationPolicy(.accessory)   // menu-bar agent, no Dock icon
+app.run()
