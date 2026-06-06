@@ -9,6 +9,7 @@ public struct Settings: Codable, Equatable {
     public var dockParallel: CGFloat?
     public var recentIcons: [String]   // paths; managed via the RecentIcons helper
     public var dockIconSize: CGFloat   // Apple Dock icon size in points
+    public var autoHide: Bool          // slide the dock off-screen until the cursor hits its edge
 
     public init(enabledBundleIDs: [String] = [],
                 barFrame: CGRect? = nil,
@@ -16,7 +17,8 @@ public struct Settings: Codable, Equatable {
                 dockEdge: DockEdge = .bottom,
                 dockParallel: CGFloat? = nil,
                 recentIcons: [String] = [],
-                dockIconSize: CGFloat = 48) {
+                dockIconSize: CGFloat = 48,
+                autoHide: Bool = false) {
         self.enabledBundleIDs = enabledBundleIDs
         self.barFrame = barFrame
         self.displayMode = displayMode
@@ -24,6 +26,7 @@ public struct Settings: Codable, Equatable {
         self.dockParallel = dockParallel
         self.recentIcons = recentIcons
         self.dockIconSize = dockIconSize
+        self.autoHide = autoHide
     }
 
     // Backward-compatible: tolerate JSON written before these fields existed.
@@ -36,6 +39,7 @@ public struct Settings: Codable, Equatable {
         dockParallel = try c.decodeIfPresent(CGFloat.self, forKey: .dockParallel)
         recentIcons = try c.decodeIfPresent([String].self, forKey: .recentIcons) ?? []
         dockIconSize = try c.decodeIfPresent(CGFloat.self, forKey: .dockIconSize) ?? 48
+        autoHide = try c.decodeIfPresent(Bool.self, forKey: .autoHide) ?? false
     }
 }
 

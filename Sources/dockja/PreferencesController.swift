@@ -38,6 +38,7 @@ private struct PreferencesView: View {
     @State private var enabled: Set<String> = []
     @State private var apps: [AppRow] = []
     @State private var iconSize: CGFloat = 48
+    @State private var autoHide = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -66,6 +67,12 @@ private struct PreferencesView: View {
                     .monospacedDigit()
                     .frame(width: 50, alignment: .trailing)
             }
+
+            Toggle("Masquer automatiquement", isOn: $autoHide)
+                .onChange(of: autoHide) { _, newValue in
+                    settings.update { $0.autoHide = newValue }
+                    onChange()
+                }
         }
         .padding()
         .onAppear(perform: load)
@@ -74,6 +81,7 @@ private struct PreferencesView: View {
     private func load() {
         enabled = settings.enabledSet
         iconSize = settings.settings.dockIconSize
+        autoHide = settings.settings.autoHide
         var rows: [String: AppRow] = [:]
         for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
             if let id = app.bundleIdentifier {

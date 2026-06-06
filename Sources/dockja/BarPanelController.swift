@@ -14,6 +14,14 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     /// reposition so a content refresh can't yank the bar back to its edge.
     private var isUserDragging = false
 
+    // Auto-hide
+    private var isActive = false        // an enabled app is focused (dock logically shown)
+    private var isRevealed = true       // currently slid into view
+    private var autoHideTimer: Timer?
+    private var hideAt: Date?
+    private let revealHotZone: CGFloat = 3
+    private let autoHideDelay: TimeInterval = 0.6
+
     var onSelect: ((WindowInfo) -> Void)?
     var onRightClick: ((CGWindowID, NSView) -> Void)?
 
@@ -74,32 +82,41 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     }
 
     func show(items: [DisplayWindow], appIcon: NSImage?) {
+        isActive = true
         model.iconSize = settings.settings.dockIconSize
         model.update(items: items, appIcon: appIcon)
-        resizeAndPlace()
+        if settings.settings.autoHide { startAutoHide() } else { stopAutoHide(); isRevealed = true }
+        placeForState(animated: false)
         if !panel.isVisible { panel.orderFrontRegardless() }
     }
 
     func update(items: [DisplayWindow], appIcon: NSImage?) {
         model.iconSize = settings.settings.dockIconSize
         model.update(items: items, appIcon: appIcon)
-        resizeAndPlace()
+        if settings.settings.autoHide { startAutoHide() } else { stopAutoHide(); isRevealed = true }
+        placeForState(animated: false)
     }
 
     func hide() {
+        isActive = false
+        stopAutoHide()
         if panel.isVisible { panel.orderOut(nil) }
         hideLabel()
     }
 
     // MARK: - Positioning
 
-    /// Keep the dock flush to its current edge, sized analytically (deterministic,
-    /// no fittingSize timing races, and matches what DockBar renders).
-    private func resizeAndPlace() {
-        guard !isUserDragging else { return }   // never reposition mid-drag
-        let size = dockSize(for: model.edge)
-        guard size.width > 1, size.height > 1 else { return }
-        placeDocked(size: size)
+    private func resizeAndPlace() { placeForState(animated: false) }
+
+    /// Place the panel either flush at its edge (revealed) or fully off-screen
+    /// (auto-hidden), sized analytically so it matches what DockBar renders.
+    private func placeForState(animated: Bool) {
+        guard !isUserDragging else { return }
+        let shown = shownFrame()
+        guard shown.width > 1, shown.height > 1 else { return }
+        let target = (settings.settings.autoHide && !isRevealed) ? hiddenFrame(shown: shown) : shown
+        if !animated, framesEqual(panel.frame, target) { return }
+        setFrame(target, animated: animated)
     }
 
     private func dockSize(for edge: DockEdge) -> CGSize {
@@ -108,28 +125,105 @@ final class BarPanelController: NSObject, NSWindowDelegate {
                                 horizontal: edge.isHorizontal)
     }
 
-    /// Snap flush to the current edge using the saved parallel offset.
-    private func placeDocked(size: CGSize) {
-        let screen = (panel.screen ?? NSScreen.main)?.visibleFrame
-            ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+    /// The flush-at-edge frame (visible position).
+    private func shownFrame() -> CGRect {
+        let screen = dockScreen()
+        let size = dockSize(for: model.edge)
         let parallel = settings.settings.dockParallel ?? defaultParallel(for: model.edge, size: size, screen: screen)
         let origin = snapper.origin(for: model.edge, size: size, parallel: parallel, screen: screen)
-        let target = CGRect(origin: origin, size: size)
-        let f = panel.frame
-        if abs(f.width - target.width) < 0.5, abs(f.height - target.height) < 0.5,
-           abs(f.origin.x - target.origin.x) < 0.5, abs(f.origin.y - target.origin.y) < 0.5 {
-            return
+        return CGRect(origin: origin, size: size)
+    }
+
+    /// Same frame shifted fully off-screen toward its edge (hidden position).
+    private func hiddenFrame(shown: CGRect) -> CGRect {
+        var f = shown
+        switch model.edge {
+        case .bottom: f.origin.y = shown.minY - shown.height
+        case .top:    f.origin.y = shown.maxY
+        case .left:   f.origin.x = shown.minX - shown.width
+        case .right:  f.origin.x = shown.maxX
         }
-        setFrameProgrammatically(target)
+        return f
     }
 
     private func defaultParallel(for edge: DockEdge, size: CGSize, screen: CGRect) -> CGFloat {
         edge.isHorizontal ? screen.midX - size.width / 2 : screen.midY - size.height / 2
     }
 
-    /// Called when the mode changes; positions immediately for the new mode.
+    private func dockScreen() -> CGRect {
+        (panel.screen ?? NSScreen.main)?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+    }
+
+    private func setFrame(_ frame: CGRect, animated: Bool) {
+        isAdjustingFrame = true
+        if animated {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.18
+                panel.animator().setFrame(frame, display: true)
+            }
+        } else {
+            panel.setFrame(frame, display: true)
+        }
+        isAdjustingFrame = false
+    }
+
+    private func framesEqual(_ a: CGRect, _ b: CGRect) -> Bool {
+        abs(a.minX - b.minX) < 0.5 && abs(a.minY - b.minY) < 0.5
+            && abs(a.width - b.width) < 0.5 && abs(a.height - b.height) < 0.5
+    }
+
+    /// Called when the edge changes; positions immediately.
     private func repositionForMode() {
         resizeAndPlace()
+    }
+
+    // MARK: - Auto-hide
+
+    private func startAutoHide() {
+        guard autoHideTimer == nil else { return }
+        isRevealed = false
+        autoHideTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.autoHideTick() }
+        }
+    }
+
+    private func stopAutoHide() {
+        autoHideTimer?.invalidate()
+        autoHideTimer = nil
+        hideAt = nil
+    }
+
+    private func autoHideTick() {
+        guard isActive, settings.settings.autoHide, !isUserDragging else { return }
+        let mouse = NSEvent.mouseLocation
+        let shown = shownFrame()
+        let inHot = hotZone(shown: shown).contains(mouse)
+        let inDock = isRevealed && shown.insetBy(dx: -8, dy: -8).contains(mouse)
+        if inHot || inDock {
+            hideAt = nil
+            if !isRevealed { isRevealed = true; placeForState(animated: true) }
+        } else if isRevealed {
+            if hideAt == nil {
+                hideAt = Date().addingTimeInterval(autoHideDelay)
+            } else if Date() >= hideAt! {
+                isRevealed = false
+                hideAt = nil
+                hideLabel()
+                placeForState(animated: true)
+            }
+        }
+    }
+
+    /// Thin hot band at the screen edge, only across the dock's span.
+    private func hotZone(shown: CGRect) -> CGRect {
+        let screen = dockScreen()
+        let t = revealHotZone
+        switch model.edge {
+        case .bottom: return CGRect(x: shown.minX, y: screen.minY, width: shown.width, height: t)
+        case .top:    return CGRect(x: shown.minX, y: screen.maxY - t, width: shown.width, height: t)
+        case .left:   return CGRect(x: screen.minX, y: shown.minY, width: t, height: shown.height)
+        case .right:  return CGRect(x: screen.maxX - t, y: shown.minY, width: t, height: shown.height)
+        }
     }
 
     // MARK: - Dragging (custom: the dock stays glued to the nearest edge, live)
@@ -139,6 +233,7 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     /// orientation live — no free-floating, no settle pause.
     private func liveDrag(to global: NSPoint) {
         isUserDragging = true
+        isRevealed = true
         hideLabel()
         let screen = screenContaining(global)
         let edge = snapper.nearestEdge(barCenter: global, screen: screen)

@@ -39,6 +39,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertNil(s.dockParallel)
         XCTAssertEqual(s.recentIcons, [])
         XCTAssertEqual(s.dockIconSize, 48)   // default when absent
+        XCTAssertFalse(s.autoHide)           // default when absent
     }
 
     func testNewFieldsRoundTrip() {
@@ -51,6 +52,7 @@ final class SettingsStoreTests: XCTestCase {
             $0.dockParallel = 120
             $0.recentIcons = ["/a.png", "/b.png"]
             $0.dockIconSize = 64
+            $0.autoHide = true
         }
         let reloaded = SettingsStore(directory: dir)
         XCTAssertEqual(reloaded.settings.displayMode, .appleDock)
@@ -58,5 +60,6 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.settings.dockParallel, 120)
         XCTAssertEqual(reloaded.settings.recentIcons, ["/a.png", "/b.png"])
         XCTAssertEqual(reloaded.settings.dockIconSize, 64)
+        XCTAssertTrue(reloaded.settings.autoHide)
     }
 }
