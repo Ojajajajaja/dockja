@@ -20,7 +20,7 @@ final class BarPanelController: NSObject, NSWindowDelegate {
 
     init(settings: SettingsStore) {
         self.settings = settings
-        let initial = Self.sanitizedFrame(settings.settings.barFrame)
+        let initial = NSRect(x: 200, y: 200, width: 200, height: 80)  // placeDocked repositions on first show
         panel = NSPanel(contentRect: initial,
                         styleMask: [.borderless, .nonactivatingPanel],
                         backing: .buffered,
@@ -37,13 +37,13 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         panel.delegate = self
 
-        model.mode = settings.settings.displayMode
         model.edge = settings.settings.dockEdge
 
         let root = BarView(
             model: model,
             onSelect: { [weak self] win in self?.onSelect?(win) },
-            onRightClick: { [weak self] id, view in self?.onRightClick?(id, view) }
+            onRightClick: { [weak self] id, view in self?.onRightClick?(id, view) },
+            onHoverIndex: { [weak self] idx in self?.showLabel(idx) }
         )
         let host = FirstMouseHostingView(rootView: root)
         host.autoresizingMask = [.width, .height]
@@ -52,10 +52,9 @@ final class BarPanelController: NSObject, NSWindowDelegate {
 
     // MARK: - Appearance
 
-    func setAppearance(mode: DisplayMode, edge: DockEdge) {
-        model.mode = mode
+    func setAppearance(edge: DockEdge) {
         model.edge = edge
-        // Defer so SwiftUI relayouts for the new mode/orientation before we read
+        // Defer so SwiftUI relayouts for the new orientation before we read
         // fittingSize to position the panel.
         DispatchQueue.main.async { [weak self] in self?.repositionForMode() }
     }
@@ -73,33 +72,18 @@ final class BarPanelController: NSObject, NSWindowDelegate {
 
     func hide() {
         if panel.isVisible { panel.orderOut(nil) }
+        hideLabel()
     }
 
     // MARK: - Positioning
 
-    /// Compact: just fit content (free position). Apple Dock: fit + snap to edge.
+    /// Fit content and keep the dock flush to its current edge.
     private func resizeAndPlace() {
         guard !isUserDragging else { return }   // never reposition mid-drag
         guard let host = panel.contentView else { return }
         let fitting = host.fittingSize
         guard fitting.width > 1, fitting.height > 1 else { return }
-
-        switch model.mode {
-        case .compact:
-            placeFreeFloating(size: fitting)
-        case .appleDock:
-            placeDocked(size: fitting)
-        }
-    }
-
-    /// Free-floating with top-left anchored (compact mode).
-    private func placeFreeFloating(size: CGSize) {
-        var frame = panel.frame
-        if abs(frame.width - size.width) < 0.5, abs(frame.height - size.height) < 0.5 { return }
-        let topY = frame.origin.y + frame.size.height
-        frame.size = size
-        frame.origin.y = topY - size.height
-        setFrameProgrammatically(frame)
+        placeDocked(size: fitting)
     }
 
     /// Snap flush to the current edge using the saved parallel offset.
@@ -131,15 +115,11 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
         guard !isAdjustingFrame else { return }
         isUserDragging = true
+        hideLabel()
         frameSaveDebouncer.call { [weak self] in
             guard let self else { return }
             self.isUserDragging = false
-            switch self.model.mode {
-            case .compact:
-                self.settings.update { $0.barFrame = self.panel.frame }
-            case .appleDock:
-                self.snapToNearestEdge()
-            }
+            self.snapToNearestEdge()
         }
     }
 
@@ -173,13 +153,64 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         isAdjustingFrame = false
     }
 
-    // MARK: - Helpers
+    // MARK: - Hover name label (its own floating panel, never clipped by the dock)
 
-    private static func sanitizedFrame(_ saved: CGRect?) -> NSRect {
-        let fallback = NSRect(x: 200, y: 200, width: 320, height: 64)
-        guard let saved, saved.width > 0, saved.height > 0 else { return fallback }
-        let onScreen = NSScreen.screens.contains { $0.frame.intersects(saved) }
-        return onScreen ? saved : fallback
+    private var labelPanel: NSPanel?
+    private var labelIndex: Int?
+
+    private func showLabel(_ index: Int?) {
+        guard let index, index >= 0, index < model.items.count else { hideLabel(); return }
+        if index == labelIndex, labelPanel?.isVisible == true { return }   // already shown
+        labelIndex = index
+
+        let host = NSHostingView(rootView: DockLabel(text: model.items[index].name))
+        host.layoutSubtreeIfNeeded()
+        let size = host.fittingSize
+
+        let lp = labelPanel ?? makeLabelPanel()
+        lp.setContentSize(size)
+        lp.contentView = host
+        lp.setFrameOrigin(labelOrigin(for: index, size: size))
+        if !lp.isVisible { lp.orderFront(nil) }
+        labelPanel = lp
+    }
+
+    private func hideLabel() {
+        labelIndex = nil
+        labelPanel?.orderOut(nil)
+    }
+
+    private func makeLabelPanel() -> NSPanel {
+        let p = NSPanel(contentRect: .zero,
+                        styleMask: [.borderless, .nonactivatingPanel],
+                        backing: .buffered, defer: false)
+        p.level = .floating
+        p.isFloatingPanel = true
+        p.hidesOnDeactivate = false
+        p.backgroundColor = .clear
+        p.isOpaque = false
+        p.hasShadow = false
+        p.ignoresMouseEvents = true
+        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+        return p
+    }
+
+    /// Screen origin for the hover label: just outside the dock on the interior
+    /// side, centered on the hovered icon.
+    private func labelOrigin(for index: Int, size: CGSize) -> CGPoint {
+        let f = panel.frame
+        let gap: CGFloat = 6
+        let main = DockMetrics.center(index)   // from the dock's leading content edge
+        switch model.edge {
+        case .bottom:
+            return CGPoint(x: f.minX + main - size.width / 2, y: f.maxY + gap)
+        case .top:
+            return CGPoint(x: f.minX + main - size.width / 2, y: f.minY - gap - size.height)
+        case .left:
+            return CGPoint(x: f.maxX + gap, y: f.maxY - main - size.height / 2)
+        case .right:
+            return CGPoint(x: f.minX - gap - size.width, y: f.maxY - main - size.height / 2)
+        }
     }
 }
 

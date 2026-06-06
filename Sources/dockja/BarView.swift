@@ -4,7 +4,6 @@ import CoreGraphics
 import DockjaCore
 
 final class BarModel: ObservableObject {
-    @Published var mode: DisplayMode = .compact
     @Published var edge: DockEdge = .bottom
     @Published var appIcon: NSImage?
     @Published var items: [DisplayWindow] = []
@@ -33,61 +32,13 @@ struct BarView: View {
     @ObservedObject var model: BarModel
     let onSelect: (WindowInfo) -> Void
     let onRightClick: (CGWindowID, NSView) -> Void
+    let onHoverIndex: (Int?) -> Void
 
     var body: some View {
-        Group {
-            switch model.mode {
-            case .compact:
-                CompactBar(model: model, onSelect: onSelect, onRightClick: onRightClick)
-            case .appleDock:
-                DockBar(model: model, onSelect: onSelect, onRightClick: onRightClick)
-            }
-        }
-    }
-}
-
-struct CompactBar: View {
-    @ObservedObject var model: BarModel
-    let onSelect: (WindowInfo) -> Void
-    let onRightClick: (CGWindowID, NSView) -> Void
-
-    private let chipWidth: CGFloat = 150
-    private let chipHeight: CGFloat = 28
-    private let iconSize: CGFloat = 16
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(Array(model.items.enumerated()), id: \.offset) { _, item in
-                Button {
-                    onSelect(item.window)
-                } label: {
-                    ZStack {
-                        Text(item.name)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, iconSize + 10)
-                        HStack {
-                            if let icon = model.image(for: item) {
-                                Image(nsImage: icon).resizable().frame(width: iconSize, height: iconSize)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.leading, 6)
-                    }
-                    .frame(width: chipWidth, height: chipHeight)
-                    .background(item.window.isActive ? Color.accentColor.opacity(0.3)
-                                                     : Color.gray.opacity(0.15))
-                    .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
-                .opacity(item.window.isMinimized ? 0.5 : 1.0)
-                .overlay(RightClickCatcher { view in onRightClick(item.window.id, view) })
-            }
-        }
-        .padding(8)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .fixedSize()
+        DockBar(model: model,
+                onSelect: onSelect,
+                onRightClick: onRightClick,
+                onHoverIndex: onHoverIndex)
     }
 }
 

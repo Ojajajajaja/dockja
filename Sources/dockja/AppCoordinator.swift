@@ -43,15 +43,13 @@ final class AppCoordinator {
     func start() {
         statusItem = StatusItemController(
             isTrusted: { AXIsProcessTrusted() },
-            currentMode: { [weak self] in self?.settings.settings.displayMode ?? .compact },
-            onSetMode: { [weak self] mode in self?.setMode(mode) },
             onOpenPreferences: { [weak self] in
                 guard let self else { return }
                 PreferencesController.shared.show(settings: self.settings)
             },
             onGrantAccessibility: { Self.promptAccessibility() }
         )
-        bar.setAppearance(mode: settings.settings.displayMode, edge: settings.settings.dockEdge)
+        bar.setAppearance(edge: settings.settings.dockEdge)
         frontmost.onChange = { [weak self] app in self?.handleFrontmost(app) }
         frontmost.start()
         handleFrontmost(NSWorkspace.shared.frontmostApplication)
@@ -91,12 +89,6 @@ final class AppCoordinator {
             self.overrides.setIcon(path, for: id)
             self.refresh()
         }
-    }
-
-    private func setMode(_ mode: DisplayMode) {
-        settings.update { $0.displayMode = mode }
-        bar.setAppearance(mode: mode, edge: settings.settings.dockEdge)
-        refresh()
     }
 
     // MARK: - Refresh
