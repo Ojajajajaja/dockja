@@ -1,6 +1,13 @@
 import AppKit
 import ApplicationServices
+import CoreGraphics
 import DockjaCore
+
+// Private AX SPI that maps an AXUIElement window to its CGWindowID. Stable for
+// the window's lifetime; used by window managers (yabai, Amethyst, …). This is
+// what gives each bar entry a fixed identity so its slot never changes.
+@_silgen_name("_AXUIElementGetWindow")
+private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
 
 final class AXAccessibilityProvider: AccessibilityProvider {
     func windows(forPID pid: pid_t) -> [DockjaCore.WindowRef] {
@@ -9,6 +16,12 @@ final class AXAccessibilityProvider: AccessibilityProvider {
         let err = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &value)
         guard err == .success, let arr = value as? [AXUIElement] else { return [] }
         return arr.map { DockjaCore.WindowRef(ax: $0) }
+    }
+
+    func windowID(_ window: DockjaCore.WindowRef) -> CGWindowID {
+        guard let el = window.ax else { return 0 }
+        var wid: CGWindowID = 0
+        return _AXUIElementGetWindow(el, &wid) == .success ? wid : 0
     }
 
     func title(of window: DockjaCore.WindowRef) -> String? {

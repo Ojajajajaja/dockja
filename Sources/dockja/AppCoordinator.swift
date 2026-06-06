@@ -11,6 +11,7 @@ final class AppCoordinator {
     private let frontmost = FrontmostAppObserver()
     private let bar: BarPanelController
     private let refreshDebouncer = Debouncer(interval: 0.1)
+    private var orderStabilizer = WindowOrderStabilizer()
     private var statusItem: StatusItemController?
     private var refreshTimer: Timer?
     private var currentApp: NSRunningApplication?
@@ -62,7 +63,9 @@ final class AppCoordinator {
               let bundleID = app.bundleIdentifier else {
             bar.hide(); stopTimer(); return
         }
-        let windows = enumerator.windows(forPID: app.processIdentifier)
+        let windows = orderStabilizer.stableOrder(
+            pid: app.processIdentifier,
+            windows: enumerator.windows(forPID: app.processIdentifier))
         switch barState(frontmostBundleID: bundleID,
                         enabled: settings.enabledSet,
                         windowCount: windows.count) {
@@ -88,7 +91,9 @@ final class AppCoordinator {
 
     private func refreshEntriesOnly() {
         guard let app = currentApp else { return }
-        let windows = enumerator.windows(forPID: app.processIdentifier)
+        let windows = orderStabilizer.stableOrder(
+            pid: app.processIdentifier,
+            windows: enumerator.windows(forPID: app.processIdentifier))
         if windows.isEmpty {
             bar.hide(); stopTimer(); return
         }

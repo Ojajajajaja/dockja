@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 @testable import DockjaCore
 
 final class FakeAccessibilityProvider: AccessibilityProvider {
@@ -27,6 +28,7 @@ final class FakeAccessibilityProvider: AccessibilityProvider {
     private func label(_ window: WindowRef) -> Int { labels[ObjectIdentifier(window)] ?? -1 }
 
     func windows(forPID pid: pid_t) -> [WindowRef] { windowsByPID[pid] ?? [] }
+    func windowID(_ window: WindowRef) -> CGWindowID { CGWindowID(label(window)) }
     func title(of window: WindowRef) -> String? { data[ObjectIdentifier(window)]?.title }
     func isMinimized(_ window: WindowRef) -> Bool { data[ObjectIdentifier(window)]?.minimized ?? false }
     func isMain(_ window: WindowRef) -> Bool { data[ObjectIdentifier(window)]?.main ?? false }

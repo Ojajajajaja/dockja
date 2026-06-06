@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import ApplicationServices
 
 /// Opaque handle to a window. Real provider wraps an `AXUIElement`;
@@ -12,13 +13,18 @@ public final class WindowRef {
 
 public struct WindowInfo {
     public let ref: WindowRef
+    /// Stable identifier for the window's lifetime (CGWindowID). Used to keep
+    /// the bar's entry order fixed even when AX reorders windows by focus.
+    /// 0 when the underlying id is unavailable.
+    public let id: CGWindowID
     public let title: String
     public let isMinimized: Bool
     public let isActive: Bool
     public let pid: pid_t
 
-    public init(ref: WindowRef, title: String, isMinimized: Bool, isActive: Bool, pid: pid_t) {
+    public init(ref: WindowRef, id: CGWindowID, title: String, isMinimized: Bool, isActive: Bool, pid: pid_t) {
         self.ref = ref
+        self.id = id
         self.title = title
         self.isMinimized = isMinimized
         self.isActive = isActive

@@ -8,6 +8,7 @@ public struct WindowEnumerator {
         provider.windows(forPID: pid).map { ref in
             WindowInfo(
                 ref: ref,
+                id: provider.windowID(ref),
                 title: provider.title(of: ref) ?? "",
                 isMinimized: provider.isMinimized(ref),
                 isActive: provider.isMain(ref),
