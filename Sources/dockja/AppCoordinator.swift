@@ -108,23 +108,11 @@ final class AppCoordinator {
     }
 
     private func refresh() {
-        guard AXIsProcessTrusted(),
-              let app = currentApp,
-              let bundleID = app.bundleIdentifier else {
+        guard let windows = currentUnitWindows() else {
             bar.hide(); stopTimer(); return
         }
-        let windows = orderStabilizer.stableOrder(
-            pid: app.processIdentifier,
-            windows: enumerator.windows(forPID: app.processIdentifier))
-        switch barState(frontmostBundleID: bundleID,
-                        enabled: settings.enabledSet,
-                        windowCount: windows.count) {
-        case .hidden:
-            bar.hide(); stopTimer()
-        case .visible:
-            bar.show(items: resolveAndPruneWindows(windows), appIcon: app.icon)
-            startTimer()
-        }
+        bar.show(items: resolveAndPruneWindows(windows))
+        startTimer()
     }
 
     private func startTimer() {
@@ -140,14 +128,42 @@ final class AppCoordinator {
     }
 
     private func refreshEntriesOnly() {
-        guard let app = currentApp else { return }
-        let windows = orderStabilizer.stableOrder(
-            pid: app.processIdentifier,
-            windows: enumerator.windows(forPID: app.processIdentifier))
-        if windows.isEmpty {
+        guard let windows = currentUnitWindows() else {
             bar.hide(); stopTimer(); return
         }
-        bar.update(items: resolveAndPruneWindows(windows), appIcon: app.icon)
+        bar.update(items: resolveAndPruneWindows(windows))
+    }
+
+    /// Windows to display for the current frontmost app: its group's merged
+    /// windows (if grouped), or just its own. nil = nothing to show (hide).
+    private func currentUnitWindows() -> [WindowInfo]? {
+        guard AXIsProcessTrusted(),
+              let app = currentApp,
+              let bundleID = app.bundleIdentifier,
+              let unit = GroupResolver.unit(frontmost: bundleID,
+                                            enabled: settings.enabledSet,
+                                            groups: settings.settings.groups)
+        else { return nil }
+        let windows = windowsForUnit(unit)
+        return windows.isEmpty ? nil : windows
+    }
+
+    /// Enumerate + stabilize windows for every running process of each bundle ID,
+    /// clustered in the unit's order (so a group reads app-by-app).
+    private func windowsForUnit(_ bundleIDs: [String]) -> [WindowInfo] {
+        var result: [WindowInfo] = []
+        for bid in bundleIDs {
+            let apps = NSWorkspace.shared.runningApplications.filter {
+                $0.bundleIdentifier == bid && $0.activationPolicy == .regular
+            }
+            for app in apps {
+                let ws = orderStabilizer.stableOrder(
+                    pid: app.processIdentifier,
+                    windows: enumerator.windows(forPID: app.processIdentifier))
+                result.append(contentsOf: ws)
+            }
+        }
+        return result
     }
 
     /// Resolve overrides into display models and prune dead window ids.

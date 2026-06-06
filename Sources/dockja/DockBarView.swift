@@ -127,7 +127,23 @@ struct DockBar: View {
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay(alignment: .bottomTrailing) { badge(item, size: size) }
         .animation(.easeOut(duration: 0.12), value: hover)
+    }
+
+    /// Original-app badge shown bottom-right when a custom icon replaces it.
+    @ViewBuilder
+    private func badge(_ item: DisplayWindow, size: CGFloat) -> some View {
+        if model.hasCustomIcon(item), let app = model.appIcon(forPID: item.window.pid) {
+            let b = size * 0.38
+            Image(nsImage: app).resizable()
+                .frame(width: b, height: b)
+                .clipShape(RoundedRectangle(cornerRadius: b * 0.225, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: b * 0.225, style: .continuous)
+                    .strokeBorder(.white.opacity(0.6), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.3), radius: 1, y: 0.5)
+                .offset(x: 2, y: 2)
+        }
     }
 
     // MARK: - Magnification

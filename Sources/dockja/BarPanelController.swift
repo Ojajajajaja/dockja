@@ -82,18 +82,18 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         DispatchQueue.main.async { [weak self] in self?.repositionForMode() }
     }
 
-    func show(items: [DisplayWindow], appIcon: NSImage?) {
+    func show(items: [DisplayWindow]) {
         isActive = true
         model.iconSize = settings.settings.dockIconSize
-        model.update(items: items, appIcon: appIcon)
+        model.update(items: items)
         if settings.settings.autoHide { startAutoHide() } else { stopAutoHide(); isRevealed = true }
         placeForState(animated: false)
         if !panel.isVisible { panel.orderFrontRegardless() }
     }
 
-    func update(items: [DisplayWindow], appIcon: NSImage?) {
+    func update(items: [DisplayWindow]) {
         model.iconSize = settings.settings.dockIconSize
-        model.update(items: items, appIcon: appIcon)
+        model.update(items: items)
         if settings.settings.autoHide { startAutoHide() } else { stopAutoHide(); isRevealed = true }
         placeForState(animated: false)
     }

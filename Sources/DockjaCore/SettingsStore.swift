@@ -10,6 +10,7 @@ public struct Settings: Codable, Equatable {
     public var recentIcons: [String]   // paths; managed via the RecentIcons helper
     public var dockIconSize: CGFloat   // Apple Dock icon size in points
     public var autoHide: Bool          // slide the dock off-screen until the cursor hits its edge
+    public var groups: [AppGroup]      // apps whose windows are shown together
 
     public init(enabledBundleIDs: [String] = [],
                 barFrame: CGRect? = nil,
@@ -18,7 +19,8 @@ public struct Settings: Codable, Equatable {
                 dockParallel: CGFloat? = nil,
                 recentIcons: [String] = [],
                 dockIconSize: CGFloat = 48,
-                autoHide: Bool = false) {
+                autoHide: Bool = false,
+                groups: [AppGroup] = []) {
         self.enabledBundleIDs = enabledBundleIDs
         self.barFrame = barFrame
         self.displayMode = displayMode
@@ -27,6 +29,7 @@ public struct Settings: Codable, Equatable {
         self.recentIcons = recentIcons
         self.dockIconSize = dockIconSize
         self.autoHide = autoHide
+        self.groups = groups
     }
 
     // Backward-compatible: tolerate JSON written before these fields existed.
@@ -40,6 +43,7 @@ public struct Settings: Codable, Equatable {
         recentIcons = try c.decodeIfPresent([String].self, forKey: .recentIcons) ?? []
         dockIconSize = try c.decodeIfPresent(CGFloat.self, forKey: .dockIconSize) ?? 48
         autoHide = try c.decodeIfPresent(Bool.self, forKey: .autoHide) ?? false
+        groups = try c.decodeIfPresent([AppGroup].self, forKey: .groups) ?? []
     }
 }
 

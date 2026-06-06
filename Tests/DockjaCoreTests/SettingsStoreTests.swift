@@ -53,6 +53,7 @@ final class SettingsStoreTests: XCTestCase {
             $0.recentIcons = ["/a.png", "/b.png"]
             $0.dockIconSize = 64
             $0.autoHide = true
+            $0.groups = [AppGroup(id: "g1", name: "Dev", bundleIDs: ["brave", "warp"])]
         }
         let reloaded = SettingsStore(directory: dir)
         XCTAssertEqual(reloaded.settings.displayMode, .appleDock)
@@ -61,5 +62,6 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.settings.recentIcons, ["/a.png", "/b.png"])
         XCTAssertEqual(reloaded.settings.dockIconSize, 64)
         XCTAssertTrue(reloaded.settings.autoHide)
+        XCTAssertEqual(reloaded.settings.groups, [AppGroup(id: "g1", name: "Dev", bundleIDs: ["brave", "warp"])])
     }
 }

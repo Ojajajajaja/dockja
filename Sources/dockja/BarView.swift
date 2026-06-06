@@ -6,17 +6,24 @@ import DockjaCore
 final class BarModel: ObservableObject {
     @Published var edge: DockEdge = .bottom
     @Published var iconSize: CGFloat = 48
-    @Published var appIcon: NSImage?
     @Published var items: [DisplayWindow] = []
 
     private var iconCache: [String: NSImage] = [:]
+    private var appIconCache: [pid_t: NSImage] = [:]
 
-    func update(items: [DisplayWindow], appIcon: NSImage?) {
+    func update(items: [DisplayWindow]) {
         self.items = items
-        self.appIcon = appIcon
     }
 
-    /// Custom icon for the item if set & loadable, else the app icon.
+    /// The original app icon for a window's process (also used for the badge).
+    func appIcon(forPID pid: pid_t) -> NSImage? {
+        if let cached = appIconCache[pid] { return cached }
+        guard let img = NSRunningApplication(processIdentifier: pid)?.icon else { return nil }
+        appIconCache[pid] = img
+        return img
+    }
+
+    /// The icon to display: custom override if set & loadable, else the app icon.
     func image(for item: DisplayWindow) -> NSImage? {
         if let path = item.iconPath {
             if let cached = iconCache[path] { return cached }
@@ -25,7 +32,13 @@ final class BarModel: ObservableObject {
                 return img
             }
         }
-        return appIcon
+        return appIcon(forPID: item.window.pid)
+    }
+
+    /// True when a custom icon is shown (so the original-app badge is needed).
+    func hasCustomIcon(_ item: DisplayWindow) -> Bool {
+        guard let path = item.iconPath else { return false }
+        return NSImage(contentsOfFile: path) != nil
     }
 }
 
