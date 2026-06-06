@@ -5,6 +5,7 @@ import DockjaCore
 
 final class BarModel: ObservableObject {
     @Published var edge: DockEdge = .bottom
+    @Published var iconSize: CGFloat = 48
     @Published var appIcon: NSImage?
     @Published var items: [DisplayWindow] = []
 

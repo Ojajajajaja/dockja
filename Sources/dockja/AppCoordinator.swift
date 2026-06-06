@@ -50,6 +50,7 @@ final class AppCoordinator {
             onGrantAccessibility: { Self.promptAccessibility() }
         )
         bar.setAppearance(edge: settings.settings.dockEdge)
+        PreferencesController.shared.onChange = { [weak self] in self?.refresh() }
         frontmost.onChange = { [weak self] app in self?.handleFrontmost(app) }
         frontmost.start()
         handleFrontmost(NSWorkspace.shared.frontmostApplication)

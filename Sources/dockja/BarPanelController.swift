@@ -14,9 +14,6 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     /// True while the user is dragging the panel; suppresses the periodic
     /// reposition so a content refresh can't yank the bar back to its edge.
     private var isUserDragging = false
-    /// The SwiftUI host; drives the panel's fitting size (the contentView is the
-    /// blur backdrop, which has no intrinsic size of its own).
-    private weak var hostingView: NSView?
 
     var onSelect: ((WindowInfo) -> Void)?
     var onRightClick: ((CGWindowID, NSView) -> Void)?
@@ -50,8 +47,6 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         )
         let host = FirstMouseHostingView(rootView: root)
         host.autoresizingMask = [.width, .height]
-        hostingView = host
-
         // Real "glass": an NSVisualEffectView blurring what's behind the window,
         // with the transparent SwiftUI dock content layered on top.
         let blur = NSVisualEffectView()
@@ -73,18 +68,19 @@ final class BarPanelController: NSObject, NSWindowDelegate {
 
     func setAppearance(edge: DockEdge) {
         model.edge = edge
-        // Defer so SwiftUI relayouts for the new orientation before we read
-        // fittingSize to position the panel.
+        model.iconSize = settings.settings.dockIconSize
         DispatchQueue.main.async { [weak self] in self?.repositionForMode() }
     }
 
     func show(items: [DisplayWindow], appIcon: NSImage?) {
+        model.iconSize = settings.settings.dockIconSize
         model.update(items: items, appIcon: appIcon)
         resizeAndPlace()
         if !panel.isVisible { panel.orderFrontRegardless() }
     }
 
     func update(items: [DisplayWindow], appIcon: NSImage?) {
+        model.iconSize = settings.settings.dockIconSize
         model.update(items: items, appIcon: appIcon)
         resizeAndPlace()
     }
@@ -96,13 +92,19 @@ final class BarPanelController: NSObject, NSWindowDelegate {
 
     // MARK: - Positioning
 
-    /// Fit content and keep the dock flush to its current edge.
+    /// Keep the dock flush to its current edge, sized analytically (deterministic,
+    /// no fittingSize timing races, and matches what DockBar renders).
     private func resizeAndPlace() {
         guard !isUserDragging else { return }   // never reposition mid-drag
-        guard let host = hostingView else { return }
-        let fitting = host.fittingSize
-        guard fitting.width > 1, fitting.height > 1 else { return }
-        placeDocked(size: fitting)
+        let size = dockSize(for: model.edge)
+        guard size.width > 1, size.height > 1 else { return }
+        placeDocked(size: size)
+    }
+
+    private func dockSize(for edge: DockEdge) -> CGSize {
+        DockMetrics.contentSize(count: model.items.count,
+                                iconSize: settings.settings.dockIconSize,
+                                horizontal: edge.isHorizontal)
     }
 
     /// Snap flush to the current edge using the saved parallel offset.
@@ -150,19 +152,13 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         let center = CGPoint(x: panel.frame.midX, y: panel.frame.midY)
         let edge = snapper.nearestEdge(barCenter: center, screen: screen)
         model.edge = edge   // flips H/V layout
-
-        // Let SwiftUI relayout for the new orientation, then snap to the size.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let host = self.hostingView else { return }
-            let size = host.fittingSize
-            // Parallel coordinate from the current drag position.
-            let parallel = edge.isHorizontal ? self.panel.frame.origin.x : self.panel.frame.origin.y
-            let origin = self.snapper.origin(for: edge, size: size, parallel: parallel, screen: screen)
-            self.setFrameProgrammatically(CGRect(origin: origin, size: size))
-            self.settings.update {
-                $0.dockEdge = edge
-                $0.dockParallel = parallel
-            }
+        let size = dockSize(for: edge)
+        let parallel = edge.isHorizontal ? panel.frame.origin.x : panel.frame.origin.y
+        let origin = snapper.origin(for: edge, size: size, parallel: parallel, screen: screen)
+        setFrameProgrammatically(CGRect(origin: origin, size: size))
+        settings.update {
+            $0.dockEdge = edge
+            $0.dockParallel = parallel
         }
     }
 
@@ -219,7 +215,8 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     private func labelOrigin(for index: Int, size: CGSize) -> CGPoint {
         let f = panel.frame
         let gap: CGFloat = 6
-        let main = DockMetrics.center(index)   // from the dock's leading content edge
+        let main = DockMetrics.center(index, count: model.items.count,
+                                      iconSize: settings.settings.dockIconSize)
         switch model.edge {
         case .bottom:
             return CGPoint(x: f.minX + main - size.width / 2, y: f.maxY + gap)

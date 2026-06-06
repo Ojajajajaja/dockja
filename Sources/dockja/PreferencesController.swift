@@ -7,10 +7,12 @@ import DockjaCore
 final class PreferencesController {
     static let shared = PreferencesController()
     private var window: NSWindow?
+    /// Called when a setting that affects the live dock changes (e.g. icon size).
+    var onChange: () -> Void = {}
 
     func show(settings: SettingsStore) {
         if window == nil {
-            let view = PreferencesView(settings: settings)
+            let view = PreferencesView(settings: settings, onChange: onChange)
             let hosting = NSHostingController(rootView: view)
             let win = NSWindow(contentViewController: hosting)
             win.title = "dockja Preferences"
@@ -32,8 +34,10 @@ private struct AppRow: Identifiable {
 
 private struct PreferencesView: View {
     let settings: SettingsStore
+    let onChange: () -> Void
     @State private var enabled: Set<String> = []
     @State private var apps: [AppRow] = []
+    @State private var iconSize: CGFloat = 48
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -49,6 +53,19 @@ private struct PreferencesView: View {
                 }
             }
             Button("Add app…") { addApp() }
+
+            Divider()
+            Text("Taille des icônes").font(.headline)
+            HStack {
+                Slider(value: $iconSize, in: 32...96, step: 1)
+                    .onChange(of: iconSize) { _, newValue in
+                        settings.update { $0.dockIconSize = newValue }
+                        onChange()
+                    }
+                Text("\(Int(iconSize)) px")
+                    .monospacedDigit()
+                    .frame(width: 50, alignment: .trailing)
+            }
         }
         .padding()
         .onAppear(perform: load)
@@ -56,6 +73,7 @@ private struct PreferencesView: View {
 
     private func load() {
         enabled = settings.enabledSet
+        iconSize = settings.settings.dockIconSize
         var rows: [String: AppRow] = [:]
         for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
             if let id = app.bundleIdentifier {
