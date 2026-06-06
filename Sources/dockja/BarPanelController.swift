@@ -15,7 +15,7 @@ final class BarPanelController: NSObject, NSWindowDelegate {
 
     init(settings: SettingsStore) {
         self.settings = settings
-        let initial = settings.settings.barFrame ?? NSRect(x: 200, y: 200, width: 320, height: 64)
+        let initial = Self.sanitizedFrame(settings.settings.barFrame)
         panel = NSPanel(contentRect: initial,
                         styleMask: [.borderless, .nonactivatingPanel],
                         backing: .buffered,
@@ -65,6 +65,15 @@ final class BarPanelController: NSObject, NSWindowDelegate {
             guard let self else { return }
             self.settings.update { $0.barFrame = self.panel.frame }
         }
+    }
+
+    // Use the saved frame only if it still lands on a connected screen, so a
+    // position saved on a now-disconnected display can't hide the bar off-screen.
+    private static func sanitizedFrame(_ saved: CGRect?) -> NSRect {
+        let fallback = NSRect(x: 200, y: 200, width: 320, height: 64)
+        guard let saved, saved.width > 0, saved.height > 0 else { return fallback }
+        let onScreen = NSScreen.screens.contains { $0.frame.intersects(saved) }
+        return onScreen ? saved : fallback
     }
 
     // Size the panel to its fixed-size content, anchoring the top-left corner so

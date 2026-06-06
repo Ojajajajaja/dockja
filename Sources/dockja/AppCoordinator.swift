@@ -14,6 +14,7 @@ final class AppCoordinator {
     private var orderStabilizer = WindowOrderStabilizer()
     private var statusItem: StatusItemController?
     private var refreshTimer: Timer?
+    private var trustTimer: Timer?
     private var currentApp: NSRunningApplication?
 
     init() {
@@ -39,6 +40,23 @@ final class AppCoordinator {
         frontmost.onChange = { [weak self] app in self?.handleFrontmost(app) }
         frontmost.start()
         handleFrontmost(NSWorkspace.shared.frontmostApplication)
+        startTrustPollingIfNeeded()
+    }
+
+    // When Accessibility is granted while the app is already running, re-evaluate
+    // so the bar appears without needing an app switch or relaunch.
+    private func startTrustPollingIfNeeded() {
+        guard !AXIsProcessTrusted() else { return }
+        trustTimer?.invalidate()
+        trustTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                guard AXIsProcessTrusted() else { return }
+                self.trustTimer?.invalidate()
+                self.trustTimer = nil
+                self.refresh()
+            }
+        }
     }
 
     static func promptAccessibility() {
