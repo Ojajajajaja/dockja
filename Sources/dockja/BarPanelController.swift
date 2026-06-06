@@ -7,6 +7,7 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     private let panel: NSPanel
     private let model = BarModel()
     private let settings: SettingsStore
+    private let frameSaveDebouncer = Debouncer(interval: 0.4)
     var onSelect: ((WindowInfo) -> Void)?
 
     init(settings: SettingsStore) {
@@ -47,8 +48,12 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         if panel.isVisible { panel.orderOut(nil) }
     }
 
-    // Persist position when the user drags the bar.
+    // Persist position when the user drags the bar. Debounced so a drag's
+    // continuous move events don't write the settings file on every tick.
     func windowDidMove(_ notification: Notification) {
-        settings.update { $0.barFrame = self.panel.frame }
+        frameSaveDebouncer.call { [weak self] in
+            guard let self else { return }
+            self.settings.update { $0.barFrame = self.panel.frame }
+        }
     }
 }

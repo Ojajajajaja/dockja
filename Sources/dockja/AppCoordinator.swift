@@ -47,6 +47,9 @@ final class AppCoordinator {
 
     private func handleFrontmost(_ app: NSRunningApplication?) {
         currentApp = app
+        // Stop the periodic refresh immediately: the old timer must not enumerate
+        // against the newly-focused app before refresh() re-decides visibility.
+        stopTimer()
         // Debounce so rapid app switching does not thrash the enumerate/show path.
         refreshDebouncer.call { [weak self] in
             Task { @MainActor in self?.refresh() }
