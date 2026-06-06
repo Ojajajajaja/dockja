@@ -16,23 +16,36 @@ struct BarView: View {
     @ObservedObject var model: BarModel
     let onSelect: (WindowInfo) -> Void
 
+    // Fixed chip geometry so every entry is the same size regardless of title.
+    private let chipWidth: CGFloat = 150
+    private let chipHeight: CGFloat = 28
+    private let iconSize: CGFloat = 16
+
     var body: some View {
         HStack(spacing: 6) {
             ForEach(Array(model.windows.enumerated()), id: \.offset) { _, win in
                 Button {
                     onSelect(win)
                 } label: {
-                    HStack(spacing: 4) {
-                        if let icon = model.icon {
-                            Image(nsImage: icon).resizable().frame(width: 16, height: 16)
-                        }
+                    ZStack {
+                        // Name centered within the whole chip; horizontal padding
+                        // keeps it clear of the icon on both sides so short names
+                        // sit visually centered.
                         Text(win.displayLabel)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .frame(maxWidth: 140, alignment: .leading)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, iconSize + 10)
+                        if let icon = model.icon {
+                            HStack {
+                                Image(nsImage: icon).resizable()
+                                    .frame(width: iconSize, height: iconSize)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.leading, 6)
+                        }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+                    .frame(width: chipWidth, height: chipHeight)
                     .background(win.isActive ? Color.accentColor.opacity(0.3)
                                              : Color.gray.opacity(0.15))
                     .cornerRadius(6)
