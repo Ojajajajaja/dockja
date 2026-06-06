@@ -17,15 +17,33 @@ final class PreferencesController {
         if window == nil {
             let view = PreferencesView(settings: settings, onChange: onChange)
             let hosting = NSHostingController(rootView: view)
+            hosting.sizingOptions = []   // keep our fixed size; don't let SwiftUI resize/move the window
             let win = NSWindow(contentViewController: hosting)
             win.title = "dockja Preferences"
             win.styleMask = [.titled, .closable]
             win.setContentSize(NSSize(width: 420, height: 600))
             window = win
         }
+        positionOppositeDock(edge: settings.settings.dockEdge)
         NSApp.activate(ignoringOtherApps: true)
-        window?.center()
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Place Preferences on the opposite side of the screen from the dock so it
+    /// never sits on top of it.
+    private func positionOppositeDock(edge: DockEdge) {
+        guard let win = window,
+              let screen = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame else { return }
+        let size = win.frame.size
+        let margin: CGFloat = 24
+        var origin = CGPoint(x: screen.midX - size.width / 2, y: screen.midY - size.height / 2)
+        switch edge {
+        case .bottom: origin.y = screen.maxY - size.height - margin   // dock bottom -> prefs top
+        case .top:    origin.y = screen.minY + margin                 // dock top -> prefs bottom
+        case .left:   origin.x = screen.maxX - size.width - margin    // dock left -> prefs right
+        case .right:  origin.x = screen.minX + margin                 // dock right -> prefs left
+        }
+        win.setFrameOrigin(origin)
     }
 }
 
