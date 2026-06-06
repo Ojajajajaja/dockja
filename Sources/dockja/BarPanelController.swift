@@ -104,7 +104,13 @@ final class BarPanelController: NSObject, NSWindowDelegate {
             ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         let parallel = settings.settings.dockParallel ?? defaultParallel(for: model.edge, size: size, screen: screen)
         let origin = snapper.origin(for: model.edge, size: size, parallel: parallel, screen: screen)
-        setFrameProgrammatically(CGRect(origin: origin, size: size))
+        let target = CGRect(origin: origin, size: size)
+        let f = panel.frame
+        if abs(f.width - target.width) < 0.5, abs(f.height - target.height) < 0.5,
+           abs(f.origin.x - target.origin.x) < 0.5, abs(f.origin.y - target.origin.y) < 0.5 {
+            return
+        }
+        setFrameProgrammatically(target)
     }
 
     private func defaultParallel(for edge: DockEdge, size: CGSize, screen: CGRect) -> CGFloat {

@@ -82,7 +82,7 @@ struct CompactBar: View {
                 }
                 .buttonStyle(.plain)
                 .opacity(item.window.isMinimized ? 0.5 : 1.0)
-                .background(RightClickCatcher { view in onRightClick(item.window.id, view) })
+                .overlay(RightClickCatcher { view in onRightClick(item.window.id, view) })
             }
         }
         .padding(8)

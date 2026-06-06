@@ -63,7 +63,7 @@ struct DockBar: View {
         .help(item.name)                                   // hover tooltip
         .animation(.easeOut(duration: 0.12), value: hover)
         .onTapGesture { onSelect(item.window) }
-        .background(RightClickCatcher { view in onRightClick(item.window.id, view) })
+        .overlay(RightClickCatcher { view in onRightClick(item.window.id, view) })
     }
 
     /// Magnification bump for the cell at `index` based on cursor distance, using

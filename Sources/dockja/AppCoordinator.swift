@@ -34,6 +34,7 @@ final class AppCoordinator {
         bar = BarPanelController(settings: settings)
         bar.onSelect = { [weak self] window in self?.raiser.raise(window) }
         bar.onRightClick = { [weak self] id, view in
+            guard id != 0 else { return }   // no stable id -> can't safely scope an override
             self?.editPopover.show(for: id, relativeTo: view)
         }
         wireEditPopover()
@@ -123,7 +124,7 @@ final class AppCoordinator {
         case .hidden:
             bar.hide(); stopTimer()
         case .visible:
-            bar.show(items: displayWindows(windows), appIcon: app.icon)
+            bar.show(items: resolveAndPruneWindows(windows), appIcon: app.icon)
             startTimer()
         }
     }
@@ -148,11 +149,11 @@ final class AppCoordinator {
         if windows.isEmpty {
             bar.hide(); stopTimer(); return
         }
-        bar.update(items: displayWindows(windows), appIcon: app.icon)
+        bar.update(items: resolveAndPruneWindows(windows), appIcon: app.icon)
     }
 
     /// Resolve overrides into display models and prune dead window ids.
-    private func displayWindows(_ windows: [WindowInfo]) -> [DisplayWindow] {
+    private func resolveAndPruneWindows(_ windows: [WindowInfo]) -> [DisplayWindow] {
         overrides.prune(keeping: Set(windows.map { $0.id }))
         return resolver.resolve(windows, overrides: overrides.overrides())
     }
