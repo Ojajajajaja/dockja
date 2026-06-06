@@ -19,7 +19,8 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     private var isRevealed = true       // currently slid into view
     private var autoHideTimer: Timer?
     private var hideAt: Date?
-    private let revealHotZone: CGFloat = 3
+    private let revealSliver: CGFloat = 4    // px left peeking when hidden
+    private let revealHotZone: CGFloat = 6   // edge band that triggers reveal
     private let autoHideDelay: TimeInterval = 0.6
 
     var onSelect: ((WindowInfo) -> Void)?
@@ -134,14 +135,15 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         return CGRect(origin: origin, size: size)
     }
 
-    /// Same frame shifted fully off-screen toward its edge (hidden position).
+    /// Same frame shifted off-screen toward its edge, leaving a thin sliver
+    /// peeking so the reveal target stays visible.
     private func hiddenFrame(shown: CGRect) -> CGRect {
         var f = shown
         switch model.edge {
-        case .bottom: f.origin.y = shown.minY - shown.height
-        case .top:    f.origin.y = shown.maxY
-        case .left:   f.origin.x = shown.minX - shown.width
-        case .right:  f.origin.x = shown.maxX
+        case .bottom: f.origin.y = shown.minY - (shown.height - revealSliver)
+        case .top:    f.origin.y = shown.minY + (shown.height - revealSliver)
+        case .left:   f.origin.x = shown.minX - (shown.width - revealSliver)
+        case .right:  f.origin.x = shown.minX + (shown.width - revealSliver)
         }
         return f
     }
