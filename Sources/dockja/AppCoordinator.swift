@@ -37,6 +37,9 @@ final class AppCoordinator {
             guard id != 0 else { return }   // no stable id -> can't safely scope an override
             self?.editPopover.show(for: id, relativeTo: view)
         }
+        bar.isAuxWindowOpen = { [weak self] in
+            (self?.editPopover.isShown ?? false) || PreferencesController.shared.isOpen
+        }
         wireEditPopover()
     }
 

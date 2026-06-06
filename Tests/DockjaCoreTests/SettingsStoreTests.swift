@@ -40,6 +40,8 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(s.recentIcons, [])
         XCTAssertEqual(s.dockIconSize, 48)   // default when absent
         XCTAssertFalse(s.autoHide)           // default when absent
+        XCTAssertEqual(s.autoHideDelay, 3)   // default when absent
+        XCTAssertEqual(s.groups, [])
     }
 
     func testNewFieldsRoundTrip() {
@@ -53,6 +55,7 @@ final class SettingsStoreTests: XCTestCase {
             $0.recentIcons = ["/a.png", "/b.png"]
             $0.dockIconSize = 64
             $0.autoHide = true
+            $0.autoHideDelay = 5
             $0.groups = [AppGroup(id: "g1", name: "Dev", bundleIDs: ["brave", "warp"])]
         }
         let reloaded = SettingsStore(directory: dir)
@@ -62,6 +65,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.settings.recentIcons, ["/a.png", "/b.png"])
         XCTAssertEqual(reloaded.settings.dockIconSize, 64)
         XCTAssertTrue(reloaded.settings.autoHide)
+        XCTAssertEqual(reloaded.settings.autoHideDelay, 5)
         XCTAssertEqual(reloaded.settings.groups, [AppGroup(id: "g1", name: "Dev", bundleIDs: ["brave", "warp"])])
     }
 }

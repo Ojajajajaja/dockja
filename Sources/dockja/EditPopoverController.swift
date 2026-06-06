@@ -7,6 +7,8 @@ import DockjaCore
 final class EditPopoverController {
     private var popover: NSPopover?
 
+    var isShown: Bool { popover?.isShown ?? false }
+
     // Wired by AppCoordinator.
     var currentName: (CGWindowID) -> String = { _ in "" }
     var recents: () -> [String] = { [] }

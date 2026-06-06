@@ -10,6 +10,9 @@ final class PreferencesController {
     /// Called when a setting that affects the live dock changes.
     var onChange: () -> Void = {}
 
+    /// True while the Preferences window is on screen (blocks dock auto-hide).
+    var isOpen: Bool { window?.isVisible ?? false }
+
     func show(settings: SettingsStore) {
         if window == nil {
             let view = PreferencesView(settings: settings, onChange: onChange)
@@ -39,6 +42,7 @@ private struct PreferencesView: View {
     @State private var apps: [AppRow] = []
     @State private var iconSize: CGFloat = 48
     @State private var autoHide = false
+    @State private var autoHideDelay: Double = 3
     @State private var groups: [AppGroup] = []
 
     var body: some View {
@@ -52,6 +56,19 @@ private struct PreferencesView: View {
                         settings.update { $0.autoHide = newValue }
                         onChange()
                     }
+                if autoHide {
+                    HStack {
+                        Text("Délai avant masquage")
+                        Slider(value: $autoHideDelay, in: 1...10, step: 0.5)
+                            .onChange(of: autoHideDelay) { _, v in
+                                settings.update { $0.autoHideDelay = v }
+                                onChange()
+                            }
+                        Text(String(format: "%.1f s", autoHideDelay))
+                            .monospacedDigit()
+                            .frame(width: 50, alignment: .trailing)
+                    }
+                }
                 Divider()
                 groupsSection
             }
@@ -149,6 +166,7 @@ private struct PreferencesView: View {
         enabled = settings.enabledSet
         iconSize = settings.settings.dockIconSize
         autoHide = settings.settings.autoHide
+        autoHideDelay = settings.settings.autoHideDelay
         groups = settings.settings.groups
         var rows: [String: AppRow] = [:]
         for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {

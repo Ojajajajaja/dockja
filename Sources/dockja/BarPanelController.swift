@@ -17,11 +17,14 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     // Auto-hide
     private var isActive = false        // an enabled app is focused (dock logically shown)
     private var isRevealed = true       // currently slid into view
+    private var isPinned = false        // user clicked the dock -> stays until the inactivity timer
+    private var lastActivity = Date()
     private var autoHideTimer: Timer?
-    private var hideAt: Date?
     private let revealSliver: CGFloat = 4    // px left peeking when hidden
     private let revealHotZone: CGFloat = 6   // edge band that triggers reveal
-    private let autoHideDelay: TimeInterval = 0.6
+    private let peekDelay: TimeInterval = 1.2  // an un-clicked reveal collapses quickly
+    /// Preferences / edit popover open -> never auto-hide (set by AppCoordinator).
+    var isAuxWindowOpen: () -> Bool = { false }
 
     var onSelect: ((WindowInfo) -> Void)?
     var onRightClick: ((CGWindowID, NSView) -> Void)?
@@ -49,8 +52,8 @@ final class BarPanelController: NSObject, NSWindowDelegate {
 
         let root = BarView(
             model: model,
-            onSelect: { [weak self] win in self?.onSelect?(win) },
-            onRightClick: { [weak self] id, view in self?.onRightClick?(id, view) },
+            onSelect: { [weak self] win in self?.markInteracted(); self?.onSelect?(win) },
+            onRightClick: { [weak self] id, view in self?.markInteracted(); self?.onRightClick?(id, view) },
             onHoverIndex: { [weak self] idx in self?.showLabel(idx) }
         )
         let host = FirstMouseHostingView(rootView: root)
@@ -67,6 +70,7 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         blur.layer?.masksToBounds = true
         blur.layer?.borderWidth = 1
         blur.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        blur.onMouseDown = { [weak self] in self?.markInteracted() }
         blur.onDrag = { [weak self] global in self?.liveDrag(to: global) }
         blur.onDragEnd = { [weak self] in self?.persistDockPosition() }
         host.frame = blur.bounds
@@ -184,6 +188,7 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     private func startAutoHide() {
         guard autoHideTimer == nil else { return }
         isRevealed = false
+        isPinned = false
         autoHideTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.autoHideTick() }
         }
@@ -192,27 +197,44 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     private func stopAutoHide() {
         autoHideTimer?.invalidate()
         autoHideTimer = nil
-        hideAt = nil
+    }
+
+    /// Any direct interaction (click/drag/edit) pins the dock open.
+    private func markInteracted() {
+        isPinned = true
+        lastActivity = Date()
     }
 
     private func autoHideTick() {
         guard isActive, settings.settings.autoHide, !isUserDragging else { return }
         let mouse = NSEvent.mouseLocation
         let shown = shownFrame()
+        let overDock = shown.insetBy(dx: -8, dy: -8).contains(mouse)
         let inHot = hotZone(shown: shown).contains(mouse)
-        let inDock = isRevealed && shown.insetBy(dx: -8, dy: -8).contains(mouse)
-        if inHot || inDock {
-            hideAt = nil
-            if !isRevealed { isRevealed = true; placeForState(animated: true) }
-        } else if isRevealed {
-            if hideAt == nil {
-                hideAt = Date().addingTimeInterval(autoHideDelay)
-            } else if Date() >= hideAt! {
-                isRevealed = false
-                hideAt = nil
-                hideLabel()
-                placeForState(animated: true)
-            }
+
+        if inHot, !isRevealed {                 // approach edge -> peek open
+            isRevealed = true
+            lastActivity = Date()
+            placeForState(animated: true)
+            return
+        }
+        if overDock {                           // hovering keeps it alive
+            lastActivity = Date()
+            return
+        }
+        guard isRevealed else { return }
+        if isAuxWindowOpen() {                   // editing prefs / window -> never hide
+            lastActivity = Date()
+            return
+        }
+        // Pinned (clicked) docks use the configurable delay; an un-clicked peek
+        // collapses quickly.
+        let delay = isPinned ? settings.settings.autoHideDelay : peekDelay
+        if Date().timeIntervalSince(lastActivity) >= delay {
+            isRevealed = false
+            isPinned = false
+            hideLabel()
+            placeForState(animated: true)
         }
     }
 
@@ -236,6 +258,7 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     private func liveDrag(to global: NSPoint) {
         isUserDragging = true
         isRevealed = true
+        markInteracted()
         hideLabel()
         let screen = screenContaining(global)
         let edge = snapper.nearestEdge(barCenter: global, screen: screen)
@@ -337,9 +360,10 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
 /// receives mouse events on the dock's empty/border areas (icon clicks are
 /// handled by the SwiftUI layer in front).
 private final class DragBlurView: NSVisualEffectView {
+    var onMouseDown: (() -> Void)?
     var onDrag: ((NSPoint) -> Void)?
     var onDragEnd: (() -> Void)?
-    override func mouseDown(with event: NSEvent) { /* become the drag origin */ }
+    override func mouseDown(with event: NSEvent) { onMouseDown?() }
     override func mouseDragged(with event: NSEvent) { onDrag?(NSEvent.mouseLocation) }
     override func mouseUp(with event: NSEvent) { onDragEnd?() }
 }
