@@ -30,7 +30,10 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         panel.delegate = self
 
         let root = BarView(model: model) { [weak self] win in self?.onSelect?(win) }
-        let host = NSHostingView(rootView: root)
+        // FirstMouseHostingView so a click on the freshly-shown non-activating
+        // panel triggers the button immediately, instead of only making the
+        // panel key and requiring a second click.
+        let host = FirstMouseHostingView(rootView: root)
         host.autoresizingMask = [.width, .height]
         panel.contentView = host
     }
@@ -56,4 +59,10 @@ final class BarPanelController: NSObject, NSWindowDelegate {
             self.settings.update { $0.barFrame = self.panel.frame }
         }
     }
+}
+
+/// Hosting view that responds to the first click even when its window is not
+/// key — needed so entries in the non-activating bar fire on the first click.
+private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
