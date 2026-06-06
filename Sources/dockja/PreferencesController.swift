@@ -13,27 +13,24 @@ final class PreferencesController {
     /// True while the Preferences window is on screen (blocks dock auto-hide).
     var isOpen: Bool { window?.isVisible ?? false }
 
-    func show(settings: SettingsStore) {
+    private let prefSize = NSSize(width: 420, height: 600)
+
+    func show(settings: SettingsStore, edge: DockEdge, screen: CGRect) {
         if window == nil {
             let view = PreferencesView(settings: settings, onChange: onChange)
             let hosting = NSHostingController(rootView: view)
-            hosting.sizingOptions = []   // keep our fixed size; don't let SwiftUI resize/move the window
+            hosting.sizingOptions = []   // don't let SwiftUI resize/move the window
             let win = NSWindow(contentViewController: hosting)
             win.title = "dockja Preferences"
             win.styleMask = [.titled, .closable]
-            win.setContentSize(NSSize(width: 420, height: 600))
+            win.setContentSize(prefSize)
+            win.contentMinSize = prefSize
+            win.contentMaxSize = prefSize   // lock size so it can't drift/resize after appearing
+            win.isRestorable = false        // don't let state restoration move it back over the dock
             window = win
         }
-        positionOppositeDock(edge: settings.settings.dockEdge)
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
-    }
+        guard let win = window else { return }
 
-    /// Place Preferences on the opposite side of the screen from the dock so it
-    /// never sits on top of it.
-    private func positionOppositeDock(edge: DockEdge) {
-        guard let win = window,
-              let screen = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame else { return }
         let size = win.frame.size
         let margin: CGFloat = 24
         var origin = CGPoint(x: screen.midX - size.width / 2, y: screen.midY - size.height / 2)
@@ -43,7 +40,10 @@ final class PreferencesController {
         case .left:   origin.x = screen.maxX - size.width - margin    // dock left -> prefs right
         case .right:  origin.x = screen.minX + margin                 // dock right -> prefs left
         }
-        win.setFrameOrigin(origin)
+
+        win.setFrame(CGRect(origin: origin, size: size), display: true)
+        NSApp.activate(ignoringOtherApps: true)
+        win.makeKeyAndOrderFront(nil)
     }
 }
 

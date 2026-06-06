@@ -17,7 +17,7 @@ final class EditPopoverController {
     var onBrowse: (CGWindowID) -> Void = { _ in }
     var onReset: (CGWindowID) -> Void = { _ in }
 
-    func show(for id: CGWindowID, relativeTo view: NSView) {
+    func show(for id: CGWindowID, relativeTo view: NSView, edge: DockEdge) {
         popover?.close()
         // The bar is non-activating; activate so the name field can take focus.
         NSApp.activate(ignoringOtherApps: true)
@@ -34,8 +34,24 @@ final class EditPopoverController {
         pop.behavior = .transient
         pop.contentSize = NSSize(width: 300, height: 240)
         pop.contentViewController = NSHostingController(rootView: edit)
-        pop.show(relativeTo: view.bounds, of: view, preferredEdge: .maxY)
+
+        // Anchor to the stable dock backdrop (not the icon view, which moves with
+        // magnification/relayout) using a frozen snapshot of the icon's rect, and
+        // open toward the screen interior so it never covers the dock.
+        let anchor = view.window?.contentView ?? view
+        let rect = view.convert(view.bounds, to: anchor)
+        pop.show(relativeTo: rect, of: anchor, preferredEdge: interiorEdge(for: edge))
         popover = pop
+    }
+
+    /// The side facing the screen interior (so the popover doesn't cover the dock).
+    private func interiorEdge(for edge: DockEdge) -> NSRectEdge {
+        switch edge {
+        case .bottom: return .maxY   // dock at bottom -> open upward
+        case .top:    return .minY
+        case .left:   return .maxX   // dock at left -> open to the right
+        case .right:  return .minX
+        }
     }
 }
 

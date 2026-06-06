@@ -34,8 +34,8 @@ final class AppCoordinator {
         bar = BarPanelController(settings: settings)
         bar.onSelect = { [weak self] window in self?.raiser.raise(window) }
         bar.onRightClick = { [weak self] id, view in
-            guard id != 0 else { return }   // no stable id -> can't safely scope an override
-            self?.editPopover.show(for: id, relativeTo: view)
+            guard let self, id != 0 else { return }   // no stable id -> can't safely scope an override
+            self.editPopover.show(for: id, relativeTo: view, edge: self.bar.currentEdge)
         }
         bar.isAuxWindowOpen = { [weak self] in
             (self?.editPopover.isShown ?? false) || PreferencesController.shared.isOpen
@@ -48,7 +48,9 @@ final class AppCoordinator {
             isTrusted: { AXIsProcessTrusted() },
             onOpenPreferences: { [weak self] in
                 guard let self else { return }
-                PreferencesController.shared.show(settings: self.settings)
+                PreferencesController.shared.show(settings: self.settings,
+                                                  edge: self.bar.currentEdge,
+                                                  screen: self.bar.currentScreenFrame())
             },
             onGrantAccessibility: { Self.promptAccessibility() }
         )

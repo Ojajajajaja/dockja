@@ -80,6 +80,10 @@ final class BarPanelController: NSObject, NSWindowDelegate {
 
     // MARK: - Appearance
 
+    /// The dock's live edge + the screen it sits on (used to place Preferences).
+    var currentEdge: DockEdge { model.edge }
+    func currentScreenFrame() -> CGRect { dockScreen() }
+
     func setAppearance(edge: DockEdge) {
         model.edge = edge
         model.iconSize = settings.settings.dockIconSize
