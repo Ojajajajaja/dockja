@@ -2,12 +2,12 @@ import Foundation
 import ApplicationServices
 
 /// Opaque handle to a window. Real provider wraps an `AXUIElement`;
-/// tests construct refs with a synthetic id (ax == nil).
+/// tests construct refs with no backing AX element.
 public final class WindowRef {
     public let ax: AXUIElement?
-    public let id: Int
-    public init(ax: AXUIElement) { self.ax = ax; self.id = -1 }
-    public init(testID id: Int) { self.ax = nil; self.id = id }
+    public init(ax: AXUIElement) { self.ax = ax }
+    /// Synthetic ref for tests (no backing AX element).
+    public init() { self.ax = nil }
 }
 
 public struct WindowInfo {

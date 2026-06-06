@@ -33,7 +33,11 @@ public final class SettingsStore {
     public var enabledSet: Set<String> { Set(settings.enabledBundleIDs) }
 
     private func save() {
-        guard let data = try? JSONEncoder().encode(settings) else { return }
-        try? data.write(to: fileURL)
+        do {
+            let data = try JSONEncoder().encode(settings)
+            try data.write(to: fileURL)
+        } catch {
+            FileHandle.standardError.write(Data("dockja: failed to save settings: \(error)\n".utf8))
+        }
     }
 }
