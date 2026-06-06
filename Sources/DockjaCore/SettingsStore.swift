@@ -4,9 +4,34 @@ import CoreGraphics
 public struct Settings: Codable, Equatable {
     public var enabledBundleIDs: [String]
     public var barFrame: CGRect?
-    public init(enabledBundleIDs: [String] = [], barFrame: CGRect? = nil) {
+    public var displayMode: DisplayMode
+    public var dockEdge: DockEdge
+    public var dockParallel: CGFloat?
+    public var recentIcons: [String]
+
+    public init(enabledBundleIDs: [String] = [],
+                barFrame: CGRect? = nil,
+                displayMode: DisplayMode = .compact,
+                dockEdge: DockEdge = .bottom,
+                dockParallel: CGFloat? = nil,
+                recentIcons: [String] = []) {
         self.enabledBundleIDs = enabledBundleIDs
         self.barFrame = barFrame
+        self.displayMode = displayMode
+        self.dockEdge = dockEdge
+        self.dockParallel = dockParallel
+        self.recentIcons = recentIcons
+    }
+
+    // Backward-compatible: tolerate JSON written before these fields existed.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabledBundleIDs = try c.decodeIfPresent([String].self, forKey: .enabledBundleIDs) ?? []
+        barFrame = try c.decodeIfPresent(CGRect.self, forKey: .barFrame)
+        displayMode = try c.decodeIfPresent(DisplayMode.self, forKey: .displayMode) ?? .compact
+        dockEdge = try c.decodeIfPresent(DockEdge.self, forKey: .dockEdge) ?? .bottom
+        dockParallel = try c.decodeIfPresent(CGFloat.self, forKey: .dockParallel)
+        recentIcons = try c.decodeIfPresent([String].self, forKey: .recentIcons) ?? []
     }
 }
 
