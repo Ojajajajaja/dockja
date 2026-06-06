@@ -3,40 +3,38 @@ import AppKit
 import CoreGraphics
 import DockjaCore
 
-/// Layout geometry shared by the dock view and the panel controller (the
-/// controller needs it to size/position the panel and place the hover label).
+/// Layout geometry shared by the dock view and the panel controller. Built on the
+/// macOS Dock ratio: the icon is 66% of the bar thickness, leaving 17% margin on
+/// each side; the active-window dot is centered in the edge-side 17% margin.
 enum DockMetrics {
+    static let iconRatio: CGFloat = 0.66
     static let spacing: CGFloat = 6
-    static let pad: CGFloat = 8
-    static let maxBump: CGFloat = 22      // peak magnification growth
-    static let dotGap: CGFloat = 3
+    static let maxBump: CGFloat = 12          // subtle magnification; stays within the bar
     static let dotSize: CGFloat = 5
 
-    /// Length of the icon row at rest (no magnification).
+    /// Bar thickness for a given icon size (icon = 66% of it).
+    static func thickness(_ iconSize: CGFloat) -> CGFloat { iconSize / iconRatio }
+    /// One side margin = 17% of the thickness.
+    static func margin(_ iconSize: CGFloat) -> CGFloat { (thickness(iconSize) - iconSize) / 2 }
+
     static func restExtent(count: Int, iconSize: CGFloat) -> CGFloat {
         guard count > 0 else { return 0 }
         return CGFloat(count) * iconSize + CGFloat(count - 1) * spacing
     }
 
-    /// Length along the strip; reserves one bump of growth + end padding so
-    /// magnified icons (which push their neighbors) never overflow.
+    /// Length along the strip: row + one bump of push room + a margin at each end.
     static func mainLength(count: Int, iconSize: CGFloat) -> CGFloat {
-        restExtent(count: count, iconSize: iconSize) + maxBump + 2 * pad
-    }
-
-    /// Thickness across the strip: grown icon + dot + gap + padding.
-    static func crossThickness(iconSize: CGFloat) -> CGFloat {
-        iconSize + maxBump + dotGap + dotSize + 2 * pad
+        restExtent(count: count, iconSize: iconSize) + maxBump + 2 * margin(iconSize)
     }
 
     static func contentSize(count: Int, iconSize: CGFloat, horizontal: Bool) -> CGSize {
         let m = mainLength(count: count, iconSize: iconSize)
-        let c = crossThickness(iconSize: iconSize)
-        return horizontal ? CGSize(width: m, height: c) : CGSize(width: c, height: m)
+        let t = thickness(iconSize)
+        return horizontal ? CGSize(width: m, height: t) : CGSize(width: t, height: m)
     }
 
-    /// Rest center of icon `index` along the main axis, from the content's
-    /// leading edge (the row is centered within the reserved length).
+    /// Rest center of icon `index` along the main axis, from the content's leading
+    /// edge (the row is centered within the reserved length).
     static func center(_ index: Int, count: Int, iconSize: CGFloat) -> CGFloat {
         let leading = (mainLength(count: count, iconSize: iconSize)
                        - restExtent(count: count, iconSize: iconSize)) / 2
@@ -78,7 +76,7 @@ struct DockBar: View {
                 cell(index: index, item: item)
             }
         }
-        .frame(width: size.width, height: size.height)   // fixed; row is centered, icons push within
+        .frame(width: size.width, height: size.height)   // fixed; row centered, icons push within
         .coordinateSpace(name: "dock")
         .onContinuousHover(coordinateSpace: .named("dock")) { phase in
             switch phase {
@@ -98,22 +96,23 @@ struct DockBar: View {
     @ViewBuilder
     private func cell(index: Int, item: DisplayWindow) -> some View {
         let s = iconSize + bump(index)
-        let inset = DockMetrics.dotSize + DockMetrics.dotGap
-        let cross = DockMetrics.crossThickness(iconSize: iconSize) - 2 * DockMetrics.pad
-        ZStack(alignment: dotAlignment) {
-            icon(item, size: s)
-                .padding(edgeSet, inset)            // leave room for the dot at the edge
-            if item.window.isActive {
-                Circle().fill(Color.primary.opacity(0.85))
-                    .frame(width: DockMetrics.dotSize, height: DockMetrics.dotSize)
-                    .padding(edgeSet, 1)
+        let t = DockMetrics.thickness(iconSize)               // full bar thickness (cross axis)
+        let dotInset = max(0, DockMetrics.margin(iconSize) / 2 - DockMetrics.dotSize / 2)
+        icon(item, size: s)
+            .frame(width: horizontal ? nil : t,
+                   height: horizontal ? t : nil,
+                   alignment: .center)                        // icon centered across the bar
+            .overlay(alignment: dotAlignment) {
+                if item.window.isActive {
+                    Circle().fill(Color.primary.opacity(0.85))
+                        .frame(width: DockMetrics.dotSize, height: DockMetrics.dotSize)
+                        .padding(edgeSet, dotInset)           // centered in the edge-side margin
+                }
             }
-        }
-        .frame(width: horizontal ? nil : cross, height: horizontal ? cross : nil)
-        .opacity(item.window.isMinimized ? 0.45 : 1.0)
-        .contentShape(Rectangle())
-        .onTapGesture { onSelect(item.window) }
-        .overlay(RightClickCatcher { view in onRightClick(item.window.id, view) })
+            .opacity(item.window.isMinimized ? 0.45 : 1.0)
+            .contentShape(Rectangle())
+            .onTapGesture { onSelect(item.window) }
+            .overlay(RightClickCatcher { view in onRightClick(item.window.id, view) })
     }
 
     @ViewBuilder
@@ -139,7 +138,7 @@ struct DockBar: View {
         return DockMetrics.maxBump * exp(-(d * d) / (2 * sigma * sigma))
     }
 
-    // MARK: - Per-edge placement of the active dot (on the edge side, with a gap)
+    // MARK: - Per-edge dot placement (edge side)
 
     private var dotAlignment: Alignment {
         switch model.edge {
