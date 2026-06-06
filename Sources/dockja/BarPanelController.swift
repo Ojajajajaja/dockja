@@ -14,6 +14,9 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     /// True while the user is dragging the panel; suppresses the periodic
     /// reposition so a content refresh can't yank the bar back to its edge.
     private var isUserDragging = false
+    /// The SwiftUI host; drives the panel's fitting size (the contentView is the
+    /// blur backdrop, which has no intrinsic size of its own).
+    private weak var hostingView: NSView?
 
     var onSelect: ((WindowInfo) -> Void)?
     var onRightClick: ((CGWindowID, NSView) -> Void)?
@@ -47,7 +50,23 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         )
         let host = FirstMouseHostingView(rootView: root)
         host.autoresizingMask = [.width, .height]
-        panel.contentView = host
+        hostingView = host
+
+        // Real "glass": an NSVisualEffectView blurring what's behind the window,
+        // with the transparent SwiftUI dock content layered on top.
+        let blur = NSVisualEffectView()
+        blur.material = .hudWindow
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        blur.wantsLayer = true
+        blur.layer?.cornerRadius = 22
+        blur.layer?.cornerCurve = .continuous
+        blur.layer?.masksToBounds = true
+        blur.layer?.borderWidth = 1
+        blur.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        host.frame = blur.bounds
+        blur.addSubview(host)
+        panel.contentView = blur
     }
 
     // MARK: - Appearance
@@ -80,7 +99,7 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     /// Fit content and keep the dock flush to its current edge.
     private func resizeAndPlace() {
         guard !isUserDragging else { return }   // never reposition mid-drag
-        guard let host = panel.contentView else { return }
+        guard let host = hostingView else { return }
         let fitting = host.fittingSize
         guard fitting.width > 1, fitting.height > 1 else { return }
         placeDocked(size: fitting)
@@ -134,7 +153,7 @@ final class BarPanelController: NSObject, NSWindowDelegate {
 
         // Let SwiftUI relayout for the new orientation, then snap to the size.
         DispatchQueue.main.async { [weak self] in
-            guard let self, let host = self.panel.contentView else { return }
+            guard let self, let host = self.hostingView else { return }
             let size = host.fittingSize
             // Parallel coordinate from the current drag position.
             let parallel = edge.isHorizontal ? self.panel.frame.origin.x : self.panel.frame.origin.y

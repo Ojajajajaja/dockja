@@ -43,7 +43,6 @@ struct DockBar: View {
             }
         }
         .padding(DockMetrics.pad)
-        .background(dockBackground)
         .fixedSize()
         .coordinateSpace(name: "dock")
         .onContinuousHover(coordinateSpace: .named("dock")) { phase in
@@ -91,18 +90,6 @@ struct DockBar: View {
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .animation(.easeOut(duration: 0.12), value: hover)
-    }
-
-    // MARK: - Glass background
-
-    private var dockBackground: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(.white.opacity(0.18), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
     }
 
     // MARK: - Magnification + hover index
