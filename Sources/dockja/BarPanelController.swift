@@ -9,7 +9,6 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     private let model = BarModel()
     private let settings: SettingsStore
     private let snapper = EdgeSnapper()
-    private let frameSaveDebouncer = Debouncer(interval: 0.4)
     private var isAdjustingFrame = false
     /// True while the user is dragging the panel; suppresses the periodic
     /// reposition so a content refresh can't yank the bar back to its edge.
@@ -30,7 +29,7 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false   // we drive dragging ourselves (glued to edges)
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
@@ -49,7 +48,7 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         host.autoresizingMask = [.width, .height]
         // Real "glass": an NSVisualEffectView blurring what's behind the window,
         // with the transparent SwiftUI dock content layered on top.
-        let blur = NSVisualEffectView()
+        let blur = DragBlurView()
         blur.material = .hudWindow
         blur.blendingMode = .behindWindow
         blur.state = .active
@@ -59,6 +58,8 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         blur.layer?.masksToBounds = true
         blur.layer?.borderWidth = 1
         blur.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        blur.onDrag = { [weak self] global in self?.liveDrag(to: global) }
+        blur.onDragEnd = { [weak self] in self?.persistDockPosition() }
         host.frame = blur.bounds
         blur.addSubview(host)
         panel.contentView = blur
@@ -131,35 +132,35 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         resizeAndPlace()
     }
 
-    // MARK: - Dragging
+    // MARK: - Dragging (custom: the dock stays glued to the nearest edge, live)
 
-    func windowDidMove(_ notification: Notification) {
-        guard !isAdjustingFrame else { return }
+    /// Called continuously while the user drags the dock background. The dock
+    /// follows the cursor but always sticks to the nearest screen edge, flipping
+    /// orientation live — no free-floating, no settle pause.
+    private func liveDrag(to global: NSPoint) {
         isUserDragging = true
         hideLabel()
-        frameSaveDebouncer.call { [weak self] in
-            guard let self else { return }
-            self.isUserDragging = false
-            self.snapToNearestEdge()
+        let screen = screenContaining(global)
+        let edge = snapper.nearestEdge(barCenter: global, screen: screen)
+        model.edge = edge
+        let size = dockSize(for: edge)
+        let parallel = edge.isHorizontal ? global.x - size.width / 2 : global.y - size.height / 2
+        let origin = snapper.origin(for: edge, size: size, parallel: parallel, screen: screen)
+        setFrameProgrammatically(CGRect(origin: origin, size: size))
+    }
+
+    private func persistDockPosition() {
+        isUserDragging = false
+        let parallel = model.edge.isHorizontal ? panel.frame.origin.x : panel.frame.origin.y
+        settings.update {
+            $0.dockEdge = self.model.edge
+            $0.dockParallel = parallel
         }
     }
 
-    /// After a drag settles in Apple Dock mode: choose nearest edge, relayout,
-    /// snap flush, and persist edge + parallel offset.
-    private func snapToNearestEdge() {
-        let screen = (panel.screen ?? NSScreen.main)?.visibleFrame
-            ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-        let center = CGPoint(x: panel.frame.midX, y: panel.frame.midY)
-        let edge = snapper.nearestEdge(barCenter: center, screen: screen)
-        model.edge = edge   // flips H/V layout
-        let size = dockSize(for: edge)
-        let parallel = edge.isHorizontal ? panel.frame.origin.x : panel.frame.origin.y
-        let origin = snapper.origin(for: edge, size: size, parallel: parallel, screen: screen)
-        setFrameProgrammatically(CGRect(origin: origin, size: size))
-        settings.update {
-            $0.dockEdge = edge
-            $0.dockParallel = parallel
-        }
+    private func screenContaining(_ point: NSPoint) -> CGRect {
+        let s = NSScreen.screens.first { $0.frame.contains(point) } ?? panel.screen ?? NSScreen.main
+        return s?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
     }
 
     private func setFrameProgrammatically(_ frame: CGRect) {
@@ -233,4 +234,15 @@ final class BarPanelController: NSObject, NSWindowDelegate {
 /// Hosting view that responds to the first click even when its window is not key.
 private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// Visual-effect backdrop that also drives custom edge-glued dragging. It only
+/// receives mouse events on the dock's empty/border areas (icon clicks are
+/// handled by the SwiftUI layer in front).
+private final class DragBlurView: NSVisualEffectView {
+    var onDrag: ((NSPoint) -> Void)?
+    var onDragEnd: (() -> Void)?
+    override func mouseDown(with event: NSEvent) { /* become the drag origin */ }
+    override func mouseDragged(with event: NSEvent) { onDrag?(NSEvent.mouseLocation) }
+    override func mouseUp(with event: NSEvent) { onDragEnd?() }
 }
