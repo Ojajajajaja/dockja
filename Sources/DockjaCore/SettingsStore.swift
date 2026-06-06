@@ -4,9 +4,50 @@ import CoreGraphics
 public struct Settings: Codable, Equatable {
     public var enabledBundleIDs: [String]
     public var barFrame: CGRect?
-    public init(enabledBundleIDs: [String] = [], barFrame: CGRect? = nil) {
+    public var displayMode: DisplayMode
+    public var dockEdge: DockEdge
+    public var dockParallel: CGFloat?
+    public var recentIcons: [String]   // paths; managed via the RecentIcons helper
+    public var dockIconSize: CGFloat   // Apple Dock icon size in points
+    public var autoHide: Bool          // slide the dock off-screen until the cursor hits its edge
+    public var autoHideDelay: Double   // inactivity seconds before a pinned dock re-hides
+    public var groups: [AppGroup]      // apps whose windows are shown together
+
+    public init(enabledBundleIDs: [String] = [],
+                barFrame: CGRect? = nil,
+                displayMode: DisplayMode = .compact,
+                dockEdge: DockEdge = .bottom,
+                dockParallel: CGFloat? = nil,
+                recentIcons: [String] = [],
+                dockIconSize: CGFloat = 48,
+                autoHide: Bool = false,
+                autoHideDelay: Double = 3,
+                groups: [AppGroup] = []) {
         self.enabledBundleIDs = enabledBundleIDs
         self.barFrame = barFrame
+        self.displayMode = displayMode
+        self.dockEdge = dockEdge
+        self.dockParallel = dockParallel
+        self.recentIcons = recentIcons
+        self.dockIconSize = dockIconSize
+        self.autoHide = autoHide
+        self.autoHideDelay = autoHideDelay
+        self.groups = groups
+    }
+
+    // Backward-compatible: tolerate JSON written before these fields existed.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabledBundleIDs = try c.decodeIfPresent([String].self, forKey: .enabledBundleIDs) ?? []
+        barFrame = try c.decodeIfPresent(CGRect.self, forKey: .barFrame)
+        displayMode = try c.decodeIfPresent(DisplayMode.self, forKey: .displayMode) ?? .compact
+        dockEdge = try c.decodeIfPresent(DockEdge.self, forKey: .dockEdge) ?? .bottom
+        dockParallel = try c.decodeIfPresent(CGFloat.self, forKey: .dockParallel)
+        recentIcons = try c.decodeIfPresent([String].self, forKey: .recentIcons) ?? []
+        dockIconSize = try c.decodeIfPresent(CGFloat.self, forKey: .dockIconSize) ?? 48
+        autoHide = try c.decodeIfPresent(Bool.self, forKey: .autoHide) ?? false
+        autoHideDelay = try c.decodeIfPresent(Double.self, forKey: .autoHideDelay) ?? 3
+        groups = try c.decodeIfPresent([AppGroup].self, forKey: .groups) ?? []
     }
 }
 

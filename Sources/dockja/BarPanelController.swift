@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import CoreGraphics
 import DockjaCore
 
 @MainActor
@@ -7,15 +8,30 @@ final class BarPanelController: NSObject, NSWindowDelegate {
     private let panel: NSPanel
     private let model = BarModel()
     private let settings: SettingsStore
-    private let frameSaveDebouncer = Debouncer(interval: 0.4)
-    /// True while we resize the panel programmatically, so the resulting move
-    /// notification isn't mistaken for a user drag and persisted.
+    private let snapper = EdgeSnapper()
     private var isAdjustingFrame = false
+    /// True while the user is dragging the panel; suppresses the periodic
+    /// reposition so a content refresh can't yank the bar back to its edge.
+    private var isUserDragging = false
+
+    // Auto-hide
+    private var isActive = false        // an enabled app is focused (dock logically shown)
+    private var isRevealed = true       // currently slid into view
+    private var isPinned = false        // user clicked the dock -> stays until the inactivity timer
+    private var lastActivity = Date()
+    private var autoHideTimer: Timer?
+    private let revealSliver: CGFloat = 4    // px left peeking when hidden
+    private let revealHotZone: CGFloat = 6   // edge band that triggers reveal
+    private let peekDelay: TimeInterval = 1.2  // an un-clicked reveal collapses quickly
+    /// Preferences / edit popover open -> never auto-hide (set by AppCoordinator).
+    var isAuxWindowOpen: () -> Bool = { false }
+
     var onSelect: ((WindowInfo) -> Void)?
+    var onRightClick: ((CGWindowID, NSView) -> Void)?
 
     init(settings: SettingsStore) {
         self.settings = settings
-        let initial = Self.sanitizedFrame(settings.settings.barFrame)
+        let initial = NSRect(x: 200, y: 200, width: 200, height: 80)  // placeDocked repositions on first show
         panel = NSPanel(contentRect: initial,
                         styleMask: [.borderless, .nonactivatingPanel],
                         backing: .buffered,
@@ -25,78 +41,333 @@ final class BarPanelController: NSObject, NSWindowDelegate {
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false   // we drive dragging ourselves (glued to edges)
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         panel.delegate = self
 
-        let root = BarView(model: model) { [weak self] win in self?.onSelect?(win) }
-        // FirstMouseHostingView so a click on the freshly-shown non-activating
-        // panel triggers the button immediately, instead of only making the
-        // panel key and requiring a second click.
+        model.edge = settings.settings.dockEdge
+
+        let root = BarView(
+            model: model,
+            onSelect: { [weak self] win in self?.markInteracted(); self?.onSelect?(win) },
+            onRightClick: { [weak self] id, view in self?.markInteracted(); self?.onRightClick?(id, view) },
+            onHoverIndex: { [weak self] idx in self?.showLabel(idx) }
+        )
         let host = FirstMouseHostingView(rootView: root)
         host.autoresizingMask = [.width, .height]
-        panel.contentView = host
+        // Real "glass": an NSVisualEffectView blurring what's behind the window,
+        // with the transparent SwiftUI dock content layered on top.
+        let blur = DragBlurView()
+        blur.material = .hudWindow
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        blur.wantsLayer = true
+        blur.layer?.cornerRadius = 22
+        blur.layer?.cornerCurve = .continuous
+        blur.layer?.masksToBounds = true
+        blur.layer?.borderWidth = 1
+        blur.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        blur.onMouseDown = { [weak self] in self?.markInteracted() }
+        blur.onDrag = { [weak self] global in self?.liveDrag(to: global) }
+        blur.onDragEnd = { [weak self] in self?.persistDockPosition() }
+        host.frame = blur.bounds
+        blur.addSubview(host)
+        panel.contentView = blur
     }
 
-    func show(icon: NSImage?, windows: [WindowInfo]) {
-        model.update(icon: icon, windows: windows)
-        resizeToFit()
+    // MARK: - Appearance
+
+    /// The dock's live edge + the screen it sits on (used to place Preferences).
+    var currentEdge: DockEdge { model.edge }
+    func currentScreenFrame() -> CGRect { dockScreen() }
+
+    func setAppearance(edge: DockEdge) {
+        model.edge = edge
+        model.iconSize = settings.settings.dockIconSize
+        DispatchQueue.main.async { [weak self] in self?.repositionForMode() }
+    }
+
+    func show(items: [DisplayWindow]) {
+        isActive = true
+        model.iconSize = settings.settings.dockIconSize
+        model.update(items: items)
+        if settings.settings.autoHide { startAutoHide() } else { stopAutoHide(); isRevealed = true }
+        placeForState(animated: false)
         if !panel.isVisible { panel.orderFrontRegardless() }
     }
 
-    func update(icon: NSImage?, windows: [WindowInfo]) {
-        model.update(icon: icon, windows: windows)
-        resizeToFit()
+    func update(items: [DisplayWindow]) {
+        model.iconSize = settings.settings.dockIconSize
+        model.update(items: items)
+        if settings.settings.autoHide { startAutoHide() } else { stopAutoHide(); isRevealed = true }
+        placeForState(animated: false)
     }
 
     func hide() {
+        isActive = false
+        stopAutoHide()
         if panel.isVisible { panel.orderOut(nil) }
+        hideLabel()
     }
 
-    // Persist position when the user drags the bar. Debounced so a drag's
-    // continuous move events don't write the settings file on every tick.
-    // Skipped during programmatic resizes so auto-fit doesn't drift the saved spot.
-    func windowDidMove(_ notification: Notification) {
-        guard !isAdjustingFrame else { return }
-        frameSaveDebouncer.call { [weak self] in
-            guard let self else { return }
-            self.settings.update { $0.barFrame = self.panel.frame }
+    // MARK: - Positioning
+
+    private func resizeAndPlace() { placeForState(animated: false) }
+
+    /// Place the panel either flush at its edge (revealed) or fully off-screen
+    /// (auto-hidden), sized analytically so it matches what DockBar renders.
+    private func placeForState(animated: Bool) {
+        guard !isUserDragging else { return }
+        let shown = shownFrame()
+        guard shown.width > 1, shown.height > 1 else { return }
+        let target = (settings.settings.autoHide && !isRevealed) ? hiddenFrame(shown: shown) : shown
+        if !animated, framesEqual(panel.frame, target) { return }
+        setFrame(target, animated: animated)
+    }
+
+    private func dockSize(for edge: DockEdge) -> CGSize {
+        DockMetrics.contentSize(count: model.items.count,
+                                iconSize: settings.settings.dockIconSize,
+                                horizontal: edge.isHorizontal)
+    }
+
+    /// The flush-at-edge frame (visible position).
+    private func shownFrame() -> CGRect {
+        let screen = dockScreen()
+        let size = dockSize(for: model.edge)
+        let parallel = settings.settings.dockParallel ?? defaultParallel(for: model.edge, size: size, screen: screen)
+        let origin = snapper.origin(for: model.edge, size: size, parallel: parallel, screen: screen)
+        return CGRect(origin: origin, size: size)
+    }
+
+    /// Same frame shifted off-screen toward its edge, leaving a thin sliver
+    /// peeking so the reveal target stays visible.
+    private func hiddenFrame(shown: CGRect) -> CGRect {
+        var f = shown
+        switch model.edge {
+        case .bottom: f.origin.y = shown.minY - (shown.height - revealSliver)
+        case .top:    f.origin.y = shown.minY + (shown.height - revealSliver)
+        case .left:   f.origin.x = shown.minX - (shown.width - revealSliver)
+        case .right:  f.origin.x = shown.minX + (shown.width - revealSliver)
+        }
+        return f
+    }
+
+    private func defaultParallel(for edge: DockEdge, size: CGSize, screen: CGRect) -> CGFloat {
+        edge.isHorizontal ? screen.midX - size.width / 2 : screen.midY - size.height / 2
+    }
+
+    private func dockScreen() -> CGRect {
+        (panel.screen ?? NSScreen.main)?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+    }
+
+    private func setFrame(_ frame: CGRect, animated: Bool) {
+        isAdjustingFrame = true
+        if animated {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.18
+                panel.animator().setFrame(frame, display: true)
+            }
+        } else {
+            panel.setFrame(frame, display: true)
+        }
+        isAdjustingFrame = false
+    }
+
+    private func framesEqual(_ a: CGRect, _ b: CGRect) -> Bool {
+        abs(a.minX - b.minX) < 0.5 && abs(a.minY - b.minY) < 0.5
+            && abs(a.width - b.width) < 0.5 && abs(a.height - b.height) < 0.5
+    }
+
+    /// Called when the edge changes; positions immediately.
+    private func repositionForMode() {
+        resizeAndPlace()
+    }
+
+    // MARK: - Auto-hide
+
+    private func startAutoHide() {
+        guard autoHideTimer == nil else { return }
+        isRevealed = false
+        isPinned = false
+        autoHideTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.autoHideTick() }
         }
     }
 
-    // Use the saved frame only if it still lands on a connected screen, so a
-    // position saved on a now-disconnected display can't hide the bar off-screen.
-    private static func sanitizedFrame(_ saved: CGRect?) -> NSRect {
-        let fallback = NSRect(x: 200, y: 200, width: 320, height: 64)
-        guard let saved, saved.width > 0, saved.height > 0 else { return fallback }
-        let onScreen = NSScreen.screens.contains { $0.frame.intersects(saved) }
-        return onScreen ? saved : fallback
+    private func stopAutoHide() {
+        autoHideTimer?.invalidate()
+        autoHideTimer = nil
     }
 
-    // Size the panel to its fixed-size content, anchoring the top-left corner so
-    // the bar grows/shrinks rightward/downward from where the user placed it.
-    private func resizeToFit() {
-        guard let host = panel.contentView else { return }
-        let fitting = host.fittingSize
-        guard fitting.width > 1, fitting.height > 1 else { return }
-        var frame = panel.frame
-        if abs(frame.width - fitting.width) < 0.5, abs(frame.height - fitting.height) < 0.5 {
+    /// Any direct interaction (click/drag/edit) pins the dock open.
+    private func markInteracted() {
+        isPinned = true
+        lastActivity = Date()
+    }
+
+    private func autoHideTick() {
+        guard isActive, settings.settings.autoHide, !isUserDragging else { return }
+        let mouse = NSEvent.mouseLocation
+        let shown = shownFrame()
+        let overDock = shown.insetBy(dx: -8, dy: -8).contains(mouse)
+        let inHot = hotZone(shown: shown).contains(mouse)
+
+        if inHot, !isRevealed {                 // approach edge -> peek open
+            isRevealed = true
+            lastActivity = Date()
+            placeForState(animated: true)
             return
         }
-        let topY = frame.origin.y + frame.size.height   // AppKit origin is bottom-left
-        frame.size = fitting
-        frame.origin.y = topY - fitting.height
+        if overDock {                           // hovering keeps it alive
+            lastActivity = Date()
+            return
+        }
+        guard isRevealed else { return }
+        if isAuxWindowOpen() {                   // editing prefs / window -> never hide
+            lastActivity = Date()
+            return
+        }
+        // Pinned (clicked) docks use the configurable delay; an un-clicked peek
+        // collapses quickly.
+        let delay = isPinned ? settings.settings.autoHideDelay : peekDelay
+        if Date().timeIntervalSince(lastActivity) >= delay {
+            isRevealed = false
+            isPinned = false
+            hideLabel()
+            placeForState(animated: true)
+        }
+    }
+
+    /// Thin hot band at the screen edge, only across the dock's span.
+    private func hotZone(shown: CGRect) -> CGRect {
+        let screen = dockScreen()
+        let t = revealHotZone
+        switch model.edge {
+        case .bottom: return CGRect(x: shown.minX, y: screen.minY, width: shown.width, height: t)
+        case .top:    return CGRect(x: shown.minX, y: screen.maxY - t, width: shown.width, height: t)
+        case .left:   return CGRect(x: screen.minX, y: shown.minY, width: t, height: shown.height)
+        case .right:  return CGRect(x: screen.maxX - t, y: shown.minY, width: t, height: shown.height)
+        }
+    }
+
+    // MARK: - Dragging (custom: the dock stays glued to the nearest edge, live)
+
+    /// Called continuously while the user drags the dock background. The dock
+    /// follows the cursor but always sticks to the nearest screen edge, flipping
+    /// orientation live — no free-floating, no settle pause.
+    private func liveDrag(to global: NSPoint) {
+        isUserDragging = true
+        isRevealed = true
+        markInteracted()
+        hideLabel()
+        let screen = screenContaining(global)
+        let edge = snapper.nearestEdge(barCenter: global, screen: screen)
+        model.edge = edge
+        let size = dockSize(for: edge)
+        let parallel = edge.isHorizontal ? global.x - size.width / 2 : global.y - size.height / 2
+        let origin = snapper.origin(for: edge, size: size, parallel: parallel, screen: screen)
+        setFrameProgrammatically(CGRect(origin: origin, size: size))
+    }
+
+    private func persistDockPosition() {
+        isUserDragging = false
+        let parallel = model.edge.isHorizontal ? panel.frame.origin.x : panel.frame.origin.y
+        settings.update {
+            $0.dockEdge = self.model.edge
+            $0.dockParallel = parallel
+        }
+    }
+
+    private func screenContaining(_ point: NSPoint) -> CGRect {
+        let s = NSScreen.screens.first { $0.frame.contains(point) } ?? panel.screen ?? NSScreen.main
+        return s?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+    }
+
+    private func setFrameProgrammatically(_ frame: CGRect) {
         isAdjustingFrame = true
         panel.setFrame(frame, display: true)
         isAdjustingFrame = false
     }
+
+    // MARK: - Hover name label (its own floating panel, never clipped by the dock)
+
+    private var labelPanel: NSPanel?
+    private var labelIndex: Int?
+
+    private func showLabel(_ index: Int?) {
+        guard let index, index >= 0, index < model.items.count else { hideLabel(); return }
+        if index == labelIndex, labelPanel?.isVisible == true { return }   // already shown
+        labelIndex = index
+
+        let host = NSHostingView(rootView: DockLabel(text: model.items[index].name))
+        host.layoutSubtreeIfNeeded()
+        let size = host.fittingSize
+
+        let lp = labelPanel ?? makeLabelPanel()
+        lp.setContentSize(size)
+        lp.contentView = host
+        lp.setFrameOrigin(labelOrigin(for: index, size: size))
+        if !lp.isVisible { lp.orderFront(nil) }
+        labelPanel = lp
+    }
+
+    private func hideLabel() {
+        labelIndex = nil
+        labelPanel?.orderOut(nil)
+    }
+
+    private func makeLabelPanel() -> NSPanel {
+        let p = NSPanel(contentRect: .zero,
+                        styleMask: [.borderless, .nonactivatingPanel],
+                        backing: .buffered, defer: false)
+        p.level = .floating
+        p.isFloatingPanel = true
+        p.hidesOnDeactivate = false
+        p.backgroundColor = .clear
+        p.isOpaque = false
+        p.hasShadow = false
+        p.ignoresMouseEvents = true
+        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+        return p
+    }
+
+    /// Screen origin for the hover label: just outside the dock on the interior
+    /// side, centered on the hovered icon.
+    private func labelOrigin(for index: Int, size: CGSize) -> CGPoint {
+        let f = panel.frame
+        let gap: CGFloat = 6
+        let main = DockMetrics.center(index, count: model.items.count,
+                                      iconSize: settings.settings.dockIconSize)
+        switch model.edge {
+        case .bottom:
+            return CGPoint(x: f.minX + main - size.width / 2, y: f.maxY + gap)
+        case .top:
+            return CGPoint(x: f.minX + main - size.width / 2, y: f.minY - gap - size.height)
+        case .left:
+            return CGPoint(x: f.maxX + gap, y: f.maxY - main - size.height / 2)
+        case .right:
+            return CGPoint(x: f.minX - gap - size.width, y: f.maxY - main - size.height / 2)
+        }
+    }
 }
 
-/// Hosting view that responds to the first click even when its window is not
-/// key — needed so entries in the non-activating bar fire on the first click.
+/// Hosting view that responds to the first click even when its window is not key.
 private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// Visual-effect backdrop that also drives custom edge-glued dragging. It only
+/// receives mouse events on the dock's empty/border areas (icon clicks are
+/// handled by the SwiftUI layer in front).
+private final class DragBlurView: NSVisualEffectView {
+    var onMouseDown: (() -> Void)?
+    var onDrag: ((NSPoint) -> Void)?
+    var onDragEnd: (() -> Void)?
+    override func mouseDown(with event: NSEvent) { onMouseDown?() }
+    override func mouseDragged(with event: NSEvent) { onDrag?(NSEvent.mouseLocation) }
+    override func mouseUp(with event: NSEvent) { onDragEnd?() }
 }

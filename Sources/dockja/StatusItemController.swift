@@ -22,7 +22,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         item.menu = menu
     }
 
-    // Rebuild on open so the Accessibility status reflects current trust.
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         if !isTrusted() {
@@ -32,11 +31,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.addItem(grant)
             menu.addItem(.separator())
         }
+
         let prefs = NSMenuItem(title: "Preferences…",
                                action: #selector(openPrefs), keyEquivalent: ",")
         prefs.target = self
         menu.addItem(prefs)
         menu.addItem(.separator())
+
         let quit = NSMenuItem(title: "Quit dockja",
                               action: #selector(quit), keyEquivalent: "q")
         quit.target = self
