@@ -1,5 +1,7 @@
 import AppKit
 import ApplicationServices
+import CoreGraphics
+import UniformTypeIdentifiers
 import DockjaCore
 
 @MainActor
@@ -12,6 +14,10 @@ final class AppCoordinator {
     private let bar: BarPanelController
     private let refreshDebouncer = Debouncer(interval: 0.1)
     private var orderStabilizer = WindowOrderStabilizer()
+    private let overrides = WindowOverrideStore()
+    private let resolver = OverrideResolver()
+    private let icons: IconLibrary
+    private let editPopover = EditPopoverController()
     private var statusItem: StatusItemController?
     private var refreshTimer: Timer?
     private var trustTimer: Timer?
@@ -24,39 +30,31 @@ final class AppCoordinator {
         settings = SettingsStore(directory: appSupport)
         enumerator = WindowEnumerator(provider: provider)
         raiser = WindowRaiser(provider: provider)
+        icons = IconLibrary(settings: settings)
         bar = BarPanelController(settings: settings)
         bar.onSelect = { [weak self] window in self?.raiser.raise(window) }
+        bar.onRightClick = { [weak self] id, view in
+            self?.editPopover.show(for: id, relativeTo: view)
+        }
+        wireEditPopover()
     }
 
     func start() {
         statusItem = StatusItemController(
             isTrusted: { AXIsProcessTrusted() },
+            currentMode: { [weak self] in self?.settings.settings.displayMode ?? .compact },
+            onSetMode: { [weak self] mode in self?.setMode(mode) },
             onOpenPreferences: { [weak self] in
                 guard let self else { return }
                 PreferencesController.shared.show(settings: self.settings)
             },
             onGrantAccessibility: { Self.promptAccessibility() }
         )
+        bar.setAppearance(mode: settings.settings.displayMode, edge: settings.settings.dockEdge)
         frontmost.onChange = { [weak self] app in self?.handleFrontmost(app) }
         frontmost.start()
         handleFrontmost(NSWorkspace.shared.frontmostApplication)
         startTrustPollingIfNeeded()
-    }
-
-    // When Accessibility is granted while the app is already running, re-evaluate
-    // so the bar appears without needing an app switch or relaunch.
-    private func startTrustPollingIfNeeded() {
-        guard !AXIsProcessTrusted() else { return }
-        trustTimer?.invalidate()
-        trustTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                guard AXIsProcessTrusted() else { return }
-                self.trustTimer?.invalidate()
-                self.trustTimer = nil
-                self.refresh()
-            }
-        }
     }
 
     static func promptAccessibility() {
@@ -64,12 +62,47 @@ final class AppCoordinator {
         _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
     }
 
+    // MARK: - Edit popover wiring
+
+    private func wireEditPopover() {
+        editPopover.currentName = { [weak self] id in self?.overrides.override(for: id).customName ?? "" }
+        editPopover.recents = { [weak self] in self?.icons.recents ?? [] }
+        editPopover.onSetName = { [weak self] id, name in
+            self?.overrides.setName(name.isEmpty ? nil : name, for: id)
+            self?.refresh()
+        }
+        editPopover.onPickIcon = { [weak self] id, path in
+            self?.overrides.setIcon(path, for: id)
+            self?.refresh()
+        }
+        editPopover.onReset = { [weak self] id in
+            self?.overrides.reset(id)
+            self?.refresh()
+        }
+        editPopover.onBrowse = { [weak self] id in
+            guard let self else { return }
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes = [.image]
+            panel.allowsMultipleSelection = false
+            NSApp.activate(ignoringOtherApps: true)
+            guard panel.runModal() == .OK, let url = panel.url,
+                  let path = self.icons.importImage(from: url) else { return }
+            self.overrides.setIcon(path, for: id)
+            self.refresh()
+        }
+    }
+
+    private func setMode(_ mode: DisplayMode) {
+        settings.update { $0.displayMode = mode }
+        bar.setAppearance(mode: mode, edge: settings.settings.dockEdge)
+        refresh()
+    }
+
+    // MARK: - Refresh
+
     private func handleFrontmost(_ app: NSRunningApplication?) {
         currentApp = app
-        // Stop the periodic refresh immediately: the old timer must not enumerate
-        // against the newly-focused app before refresh() re-decides visibility.
         stopTimer()
-        // Debounce so rapid app switching does not thrash the enumerate/show path.
         refreshDebouncer.call { [weak self] in
             Task { @MainActor in self?.refresh() }
         }
@@ -90,7 +123,7 @@ final class AppCoordinator {
         case .hidden:
             bar.hide(); stopTimer()
         case .visible:
-            bar.show(icon: app.icon, windows: windows)
+            bar.show(items: displayWindows(windows), appIcon: app.icon)
             startTimer()
         }
     }
@@ -115,6 +148,28 @@ final class AppCoordinator {
         if windows.isEmpty {
             bar.hide(); stopTimer(); return
         }
-        bar.update(icon: app.icon, windows: windows)
+        bar.update(items: displayWindows(windows), appIcon: app.icon)
+    }
+
+    /// Resolve overrides into display models and prune dead window ids.
+    private func displayWindows(_ windows: [WindowInfo]) -> [DisplayWindow] {
+        overrides.prune(keeping: Set(windows.map { $0.id }))
+        return resolver.resolve(windows, overrides: overrides.overrides())
+    }
+
+    // MARK: - Trust polling
+
+    private func startTrustPollingIfNeeded() {
+        guard !AXIsProcessTrusted() else { return }
+        trustTimer?.invalidate()
+        trustTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                guard AXIsProcessTrusted() else { return }
+                self.trustTimer?.invalidate()
+                self.trustTimer = nil
+                self.refresh()
+            }
+        }
     }
 }
