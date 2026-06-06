@@ -7,7 +7,7 @@ public struct Settings: Codable, Equatable {
     public var displayMode: DisplayMode
     public var dockEdge: DockEdge
     public var dockParallel: CGFloat?
-    public var recentIcons: [String]
+    public var recentIcons: [String]   // paths; managed via the RecentIcons helper
 
     public init(enabledBundleIDs: [String] = [],
                 barFrame: CGRect? = nil,

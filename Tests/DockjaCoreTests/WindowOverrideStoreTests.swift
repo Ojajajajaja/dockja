@@ -35,4 +35,27 @@ final class WindowOverrideStoreTests: XCTestCase {
         XCTAssertNil(store.overrides()[1])
         XCTAssertEqual(store.overrides()[2]?.customName, "B")
     }
+
+    func testClearingIconAloneKeepsEntryWhenNamePresent() {
+        let store = WindowOverrideStore()
+        store.setName("Build", for: 5)
+        store.setIcon("/a.png", for: 5)
+        store.setIcon(nil, for: 5)
+        XCTAssertEqual(store.override(for: 5).customName, "Build")
+        XCTAssertNil(store.override(for: 5).iconPath)
+        XCTAssertNotNil(store.overrides()[5])
+    }
+
+    func testClearingIconAloneDropsEntryWhenNameAbsent() {
+        let store = WindowOverrideStore()
+        store.setIcon("/a.png", for: 5)
+        store.setIcon(nil, for: 5)
+        XCTAssertTrue(store.overrides().isEmpty)
+    }
+
+    func testWhitespaceOnlyNameTreatedAsEmpty() {
+        let store = WindowOverrideStore()
+        store.setName("   ", for: 5)
+        XCTAssertTrue(store.overrides().isEmpty)
+    }
 }

@@ -32,4 +32,11 @@ final class OverrideResolverTests: XCTestCase {
         let out = OverrideResolver().resolve([win(2, "")], overrides: [:])
         XCTAssertEqual(out[0].name, "Untitled")
     }
+
+    func testEmptyIconPathNilsOut() {
+        let ov: [CGWindowID: WindowOverride] = [1: WindowOverride(customName: nil, iconPath: "")]
+        let out = OverrideResolver().resolve([win(1, "Gmail")], overrides: ov)
+        XCTAssertNil(out[0].iconPath)
+        XCTAssertEqual(out[0].name, "Gmail")
+    }
 }

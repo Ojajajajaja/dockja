@@ -6,6 +6,8 @@ import CoreGraphics
 public struct EdgeSnapper {
     public init() {}
 
+    /// Nearest screen edge to the bar center. Ties break by priority
+    /// left > right > bottom > top.
     public func nearestEdge(barCenter c: CGPoint, screen s: CGRect) -> DockEdge {
         let dLeft = c.x - s.minX
         let dRight = s.maxX - c.x

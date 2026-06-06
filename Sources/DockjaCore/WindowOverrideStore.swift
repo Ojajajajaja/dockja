@@ -15,7 +15,8 @@ public final class WindowOverrideStore {
 
     public func setName(_ name: String?, for id: CGWindowID) {
         var o = map[id] ?? WindowOverride()
-        o.customName = name
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        o.customName = (trimmed?.isEmpty == true) ? nil : trimmed
         store(o, for: id)
     }
 
