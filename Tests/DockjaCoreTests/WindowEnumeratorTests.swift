@@ -18,6 +18,19 @@ final class WindowEnumeratorTests: XCTestCase {
         XCTAssertEqual(result[1].displayLabel, "Untitled")
     }
 
+    func testExcludesNonStandardHelperWindows() {
+        // Chromium apps (Brave/Chrome) expose untitled helper AX windows that are
+        // not AXStandardWindow; they must not surface as "Untitled" bar entries.
+        let fake = FakeAccessibilityProvider()
+        fake.addWindow(pid: 42, id: 1, title: "Gmail", main: true)
+        fake.addWindow(pid: 42, id: 2, title: "", standard: false)
+
+        let result = WindowEnumerator(provider: fake).windows(forPID: 42)
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].title, "Gmail")
+    }
+
     func testReturnsEmptyForUnknownPID() {
         let fake = FakeAccessibilityProvider()
         XCTAssertTrue(WindowEnumerator(provider: fake).windows(forPID: 99).isEmpty)

@@ -5,7 +5,7 @@ public struct WindowEnumerator {
     public init(provider: AccessibilityProvider) { self.provider = provider }
 
     public func windows(forPID pid: pid_t) -> [WindowInfo] {
-        provider.windows(forPID: pid).map { ref in
+        provider.windows(forPID: pid).filter { provider.isStandardWindow($0) }.map { ref in
             WindowInfo(
                 ref: ref,
                 id: provider.windowID(ref),

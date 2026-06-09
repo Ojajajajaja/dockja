@@ -18,6 +18,10 @@ final class AXAccessibilityProvider: AccessibilityProvider {
         return arr.map { DockjaCore.WindowRef(ax: $0) }
     }
 
+    func isStandardWindow(_ window: DockjaCore.WindowRef) -> Bool {
+        copyString(window.ax, kAXSubroleAttribute) == (kAXStandardWindowSubrole as String)
+    }
+
     func windowID(_ window: DockjaCore.WindowRef) -> CGWindowID {
         guard let el = window.ax else { return 0 }
         var wid: CGWindowID = 0

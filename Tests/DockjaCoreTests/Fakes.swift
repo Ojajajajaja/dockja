@@ -7,6 +7,7 @@ final class FakeAccessibilityProvider: AccessibilityProvider {
         var title: String
         var minimized: Bool
         var main: Bool
+        var standard: Bool
     }
 
     private var windowsByPID: [pid_t: [WindowRef]] = [:]
@@ -17,17 +18,18 @@ final class FakeAccessibilityProvider: AccessibilityProvider {
     var calls: [String] = []
 
     func addWindow(pid: pid_t, id: Int, title: String,
-                   minimized: Bool = false, main: Bool = false) {
+                   minimized: Bool = false, main: Bool = false, standard: Bool = true) {
         let ref = WindowRef()
         let oid = ObjectIdentifier(ref)
         windowsByPID[pid, default: []].append(ref)
-        data[oid] = FakeWindow(title: title, minimized: minimized, main: main)
+        data[oid] = FakeWindow(title: title, minimized: minimized, main: main, standard: standard)
         labels[oid] = id
     }
 
     private func label(_ window: WindowRef) -> Int { labels[ObjectIdentifier(window)] ?? -1 }
 
     func windows(forPID pid: pid_t) -> [WindowRef] { windowsByPID[pid] ?? [] }
+    func isStandardWindow(_ window: WindowRef) -> Bool { data[ObjectIdentifier(window)]?.standard ?? true }
     func windowID(_ window: WindowRef) -> CGWindowID { CGWindowID(label(window)) }
     func title(of window: WindowRef) -> String? { data[ObjectIdentifier(window)]?.title }
     func isMinimized(_ window: WindowRef) -> Bool { data[ObjectIdentifier(window)]?.minimized ?? false }
